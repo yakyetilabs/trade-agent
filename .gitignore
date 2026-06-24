@@ -1,0 +1,43 @@
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.zed/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.uv/                   # uv package manager cache directory
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.tox/
+
+dist/
+node_modules/
+/frontend/dist/        # Vite production build output
+.eslintcache
+*.tsbuildinfo
+# Project-Specific Evaluation Artifacts
+/backend/eval/results/   # Keeps heavy evaluation run json reports out of git history
+
+.env
+.env.local
+.env.*
+*.pem
+*.key
+
+# Prevent accidental leaks of downloaded GCP Service Account keys
+*key*.json
+*credentials*.json
+
+# Local agent/tooling config — kept local, never committed
+CLAUDE.md
+CLAUDE.local.md
+.claude/
