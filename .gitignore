@@ -30,6 +30,9 @@ node_modules/
 .env
 .env.local
 .env.*
+# ...but DO ship the example templates referenced by the quickstart
+!.env.example
+!.env.local.example
 *.pem
 *.key
 
