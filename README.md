@@ -2,7 +2,7 @@
 
 An enterprise-grade, vendor-scoped agentic AI assistant that parses complex shipping manifests, tracking records, and international trade regulations to draft official clearance responses for delayed or flagged import shipments.
 
-Built on a serverless GCP stack using **Gemini 2.0 Flash via Vertex AI**, **Python LangGraph**, **Pinecone**, **Google Cloud Firestore**, and **React**.
+Built on a serverless GCP stack using **Gemini 2.5 Flash via Vertex AI**, **Python LangGraph**, **Pinecone**, **Google Cloud Firestore**, and **React**.
 
 ---
 
@@ -46,7 +46,7 @@ The architecture relies entirely on highly efficient, serverless primitives desi
 |                                                                                 v                 |
 |                                                   +-------------------------------------------+   |
 |                                                   |     LangGraph Orchestration State Machine |   |
-|                                                   |     (Gemini 2.0 Flash Core Brain)         |   |
+|                                                   |     (Gemini 2.5 Flash Core Brain)         |   |
 |                                                   +-------------------------------------------+   |
 |                                                                     /    |    \                   |
 |                                      ______________________________/     |     \_________________ |
@@ -56,8 +56,8 @@ The architecture relies entirely on highly efficient, serverless primitives desi
                                    v                                       v                          v
                      +----------------------------+          +---------------------------+    +-----------------------+
                      |  Cloud Firestore (Native)  |          | Vertex AI Model Engine    |    |  Pinecone Free Index  |
-                     |  - trade-agent-Vendors     |          | - Gemini 2.0 Flash (Core) |    |  - Vectorized HTS     |
-                     |  - trade-agent-Shipments   |          | - Gemini 1.5 Pro (Eval)   |    |    Treaties & Clauses |
+                     |  - trade-agent-Vendors     |          | - Gemini 2.5 Flash (Core) |    |  - Vectorized HTS     |
+                     |  - trade-agent-Shipments   |          | - Gemini 2.5 Pro (Eval)   |    |    Treaties & Clauses |
                      |  - trade-agent-AgentTraces |          +---------------------------+    +-----------------------+
                      +----------------------------+
 
@@ -67,11 +67,13 @@ The architecture relies entirely on highly efficient, serverless primitives desi
 
 - **Runtime Backend:** Python · FastAPI · GCP Cloud Run (CPU allocated only during active requests to maintain a zero-cost scale-to-zero model).
 - **Agent Framework:** Python LangGraph (`langgraph`) enforcing fixed loop iteration budgets and deterministic state paths.
-- **Inference Platform:** Vertex AI SDK executing Gemini 2.0 Flash for core tool calling, utilizing Gemini 1.5 Pro as a specialized benchmark evaluator.
-- **Embeddings & Knowledge Base:** Vertex AI Embeddings (`text-embedding-004`) pointing directly via open-source LangChain abstractions to a free-tier Pinecone index.
+- **Inference Platform:** Vertex AI SDK executing Gemini 2.5 Flash (`gemini-2.5-flash`) for core tool calling, utilizing Gemini 2.5 Pro (`gemini-2.5-pro`) as a specialized benchmark evaluator.
+- **Embeddings & Knowledge Base:** Vertex AI Embeddings (`gemini-embedding-001` at 768 output dimensions) pointing directly via open-source LangChain abstractions to a free-tier Pinecone index created at the matching 768 dimension.
 - **State & Audit Database:** Google Cloud Firestore in Native Mode tracking active entities and storing execution records (`trade-agent-AgentTraces`).
 - **Frontend Matrix:** React · Vite · TypeScript · Tailwind CSS, deployed instantly to Firebase Hosting.
 - **Package Management Blueprint:** Monorepo architecture managed via `uv` on the backend and `pnpm` on the frontend.
+
+> 💸 **Budget posture, stated honestly:** the **fixed + idle** footprint is genuinely **$0** (Cloud Run scale-to-zero, Firestore/Auth/Hosting free tiers, Pinecone Starter). AI inference (Gemini 2.5 Flash/Pro + `gemini-embedding-001`) is **usage-metered and funded by the $200 GCP trial credits** — at demo volume this is cents. Two operational caveats: a scale-to-zero Python container has a **~5–15s cold start** on the first request after idle (warm requests are in the few-seconds range), and the free Pinecone Starter index **auto-pauses after ~3 weeks of inactivity**.
 
 ---
 
@@ -104,6 +106,8 @@ Two independent python modules run prior to graph execution, executing in sub-10
 
 Traditional rate limiters calculate request frequencies, but agentic pipelines can be broken by single, massive token-injection attacks that drain model quotas. This backend executes an application-level **Sliding Window Counter** that monitors both raw request spikes and estimated input/output token counts per user session, safely logging structural anomalies to Cloud Logging.
 
+> ⚠️ **Honest scope:** this counter is **per-instance in-memory** state. It does **not** survive Cloud Run scale-to-zero or coordinate across multiple instances, so it is a best-effort soft guard rather than a globally enforced limit. The in-memory allowlist (§1) and the draft-only disposition remain the real cost and perimeter controls.
+
 ---
 
 ## 📋 Interactive Test & Verification Suite
@@ -122,19 +126,18 @@ Reviewers or operators interacting with the live system can test specific techni
 ## 📂 Repository Layout
 
 ```
-├── backend/
+├── backend/                   # run commands from here; imports rooted at `src.`
 │   ├── src/
-│   │   ├── app.py             # FastAPI framework instantiation & API surface
-│   │   ├── config.py          # Centralized environmental parameters & allowlist parsing
+│   │   ├── app.py             # FastAPI instantiation & API surface (entrypoint)
+│   │   ├── config.py          # Centralized env parsing & allowlist (only os.getenv site)
 │   │   ├── agent.py           # LangGraph state machine flow definitions
-│   ├── middleware/
-│   │   ├── security.py        # Firebase JWT verification & memory allowlist
-│   │   └── rate_limiter.py    # Dual-axis RPM/TPM sliding window counter
-│   │   ├── tools/             # Python tool factories utilizing enclosed vendor scoping
-│   │   ├── safeguards/        # Local escalation and cross-vendor isolation guards
-│   │   └── gcp/               # Global client singletons for Firestore and Vertex AI
-│   ├── eval/                  # version-controlled canonical test matrix
-│   ├── scripts/               # Synthetic database seed engines & vector ingestion scripts
+│   │   ├── security.py        # Firebase Admin JWT verification & in-memory allowlist
+│   │   ├── middleware/        # rate_limiter.py — best-effort per-instance RPM/TPM counter
+│   │   ├── tools/             # one file per tool; vendor scope via ToolRuntime context
+│   │   ├── safeguards/        # escalation_guard.py, cross_vendor_guard.py (pre-model)
+│   │   └── gcp/               # Firestore + Vertex + firebase_admin client singletons
+│   ├── eval/                  # cases.json (version-controlled); results/ (gitignored)
+│   ├── scripts/               # synthetic data seed engines & vector ingestion scripts
 │   └── deploy.sh              # Cloud Run docker compilation and delivery sequence
 ├── frontend/
 │   ├── src/                   # React 18 Single Page Application code layout
@@ -168,8 +171,8 @@ uv run python -m scripts.seed_data
 uv run python -m scripts.ingest_kb
 
 # 4. Launch both development servers concurrently
-# Runs backend API at http://127.0.0.1:8000
-cd backend && uv run fastapi dev main.py
+# Runs backend API at http://127.0.0.1:8000 (run from backend/ so `src.` imports resolve)
+cd backend && uv run fastapi dev src/app.py
 
 # Open a separate terminal: Runs frontend interface at http://localhost:5173
 cd frontend && pnpm dev

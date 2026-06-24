@@ -24,9 +24,8 @@ node_modules/
 /frontend/dist/        # Vite production build output
 .eslintcache
 *.tsbuildinfo
-CLAUDE.md
 # Project-Specific Evaluation Artifacts
-/backend/app/eval/results/   # Keeps heavy evaluation run json reports out of git history
+/backend/eval/results/   # Keeps heavy evaluation run json reports out of git history
 
 .env
 .env.local
@@ -37,3 +36,8 @@ CLAUDE.md
 # Prevent accidental leaks of downloaded GCP Service Account keys
 *key*.json
 *credentials*.json
+
+# Local agent/tooling config — kept local, never committed
+CLAUDE.md
+CLAUDE.local.md
+.claude/
