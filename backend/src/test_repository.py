@@ -144,6 +144,35 @@ def test_update_trace_disposition_updates_single_field(
     document.return_value.update.assert_called_once_with({"disposition": "approved"})
 
 
+def test_get_trace_maps_document_to_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    trace = AgentTrace(
+        trace_id="tr-1",
+        timestamp="2026-06-25T00:00:00Z",
+        vendor_id="V-001",
+        user_inquiry="x",
+        disposition=TraceDisposition.DRAFT,
+        model="gemini-2.5-flash",
+    )
+    client = MagicMock()
+    client.collection.return_value.document.return_value.get.return_value = _snapshot(
+        exists=True, data=trace.model_dump(mode="json")
+    )
+    _patch_client(monkeypatch, client)
+
+    result = repository.get_trace("tr-1")
+    assert isinstance(result, AgentTrace)
+    assert result.trace_id == "tr-1"
+    assert result.vendor_id == "V-001"
+
+
+def test_get_trace_returns_none_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = MagicMock()
+    client.collection.return_value.document.return_value.get.return_value = _snapshot(exists=False)
+    _patch_client(monkeypatch, client)
+
+    assert repository.get_trace("tr-404") is None
+
+
 def test_list_recent_traces_orders_and_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     newer = AgentTrace(
         trace_id="tr-new",

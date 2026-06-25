@@ -4,7 +4,7 @@ This is the step-by-step manual setup for the `trade-agent` stack. Per the proje
 deliberate design decision to ship with **no managed IaC** for the initial build — there is **no
 Terraform**: console setup plus single-line CLI deploy scripts only.
 
-Everything lives in **one** project — `trade-agent-a5208`. A Firebase project *is* a GCP project,
+Everything lives in **one** project — `trade-agent-ff12a`. A Firebase project *is* a GCP project,
 so Firebase Auth, Firestore, Cloud Run, and Firebase Hosting all share it. This is what makes the
 Firebase ID-token audience (`= <project-id>`) line up with the backend verifier.
 
@@ -30,7 +30,7 @@ Accounts you already have: a Google Cloud account (with the $200 trial credits) 
 Conventions used below:
 
 - **Project display name:** `trade-agent`
-- **Project ID:** `trade-agent-a5208` (Firebase auto-appended `-a5208` because `trade-agent` was
+- **Project ID:** `trade-agent-ff12a` (Firebase auto-appended `-ff12a` because `trade-agent` was
   taken globally; the ID is immutable and is what `GCP_PROJECT` / the token audience must equal)
 - **GCP region:** `us-central1`
 - **Resource prefix:** every GCP resource is named with the `trade-agent-` prefix (a non-negotiable project naming convention for account-level isolation).
@@ -40,20 +40,20 @@ Conventions used below:
 ## 1. Create the project & link billing
 
 > ✅ **Already done via Firebase.** This project was created by adding Firebase (Step 3) with display
-> name `trade-agent`; Firebase provisioned the underlying GCP project with ID `trade-agent-a5208`. The
+> name `trade-agent`; Firebase provisioned the underlying GCP project with ID `trade-agent-ff12a`. The
 > steps below are the equivalent console steps — you do **not** need to re-create the project.
 
 **Console:** https://console.cloud.google.com → project picker → **New Project** → display name `trade-agent`
-(the resulting ID is `trade-agent-a5208`). Then **Billing** → link your billing account (the trial credits
+(the resulting ID is `trade-agent-ff12a`). Then **Billing** → link your billing account (the trial credits
 live here; scale-to-zero keeps the bill at $0).
 
 **CLI equivalent:**
 
 ```bash
-gcloud projects create trade-agent-a5208 --name="trade-agent"
-gcloud config set project trade-agent-a5208
+gcloud projects create trade-agent-ff12a --name="trade-agent"
+gcloud config set project trade-agent-ff12a
 # Link billing (find your account id with: gcloud billing accounts list)
-gcloud billing projects link trade-agent-a5208 --billing-account=XXXXXX-XXXXXX-XXXXXX
+gcloud billing projects link trade-agent-ff12a --billing-account=XXXXXX-XXXXXX-XXXXXX
 ```
 
 ---
@@ -71,7 +71,7 @@ gcloud services enable \
   cloudbuild.googleapis.com \
   iamcredentials.googleapis.com \
   identitytoolkit.googleapis.com \
-  --project=trade-agent-a5208
+  --project=trade-agent-ff12a
 ```
 
 - `run` — Cloud Run (backend container)
@@ -85,7 +85,7 @@ gcloud services enable \
 
 ## 3. Add Firebase to the project
 
-**Console:** https://console.firebase.google.com → **Add project** → select the existing `trade-agent-a5208`
+**Console:** https://console.firebase.google.com → **Add project** → select the existing `trade-agent-ff12a`
 GCP project (do **not** create a new one). Accept the Spark (free) plan.
 
 ### 3a. Enable Authentication
@@ -150,42 +150,47 @@ call Vertex AI.
 ```bash
 gcloud iam service-accounts create trade-agent-platform-access \
   --display-name="trade-agent platform access" \
-  --project=trade-agent-a5208
+  --project=trade-agent-ff12a
 
-SA="trade-agent-platform-access@trade-agent-a5208.iam.gserviceaccount.com"
+SA="trade-agent-platform-access@trade-agent-ff12a.iam.gserviceaccount.com"
 
 # Vertex AI (Gemini + embeddings)
-gcloud projects add-iam-policy-binding trade-agent-a5208 \
+gcloud projects add-iam-policy-binding trade-agent-ff12a \
   --member="serviceAccount:${SA}" --role="roles/aiplatform.user"
 
 # Firestore read/write
-gcloud projects add-iam-policy-binding trade-agent-a5208 \
+gcloud projects add-iam-policy-binding trade-agent-ff12a \
   --member="serviceAccount:${SA}" --role="roles/datastore.user"
 
 # Structured logging (trace surface) + minor logging read for operator debugging
-gcloud projects add-iam-policy-binding trade-agent-a5208 \
+gcloud projects add-iam-policy-binding trade-agent-ff12a \
   --member="serviceAccount:${SA}" --role="roles/logging.logWriter"
-gcloud projects add-iam-policy-binding trade-agent-a5208 \
+gcloud projects add-iam-policy-binding trade-agent-ff12a \
   --member="serviceAccount:${SA}" --role="roles/logging.viewer"
 
 # Firebase token verification (Admin SDK)
-gcloud projects add-iam-policy-binding trade-agent-a5208 \
+gcloud projects add-iam-policy-binding trade-agent-ff12a \
   --member="serviceAccount:${SA}" --role="roles/firebaseauth.admin"
 ```
 
 > The `logging.viewer` grant is the deliberately-not-least-privilege bit called out in
 > `DESIGN_DECISIONS.md` §8 — minor logging read for rapid operator debugging.
 
-### 5a. Key for local development only
+### 5a. Local development credentials
 
 Cloud Run uses the attached service account automatically (no key needed in production). For **local
-dev**, download a key:
+dev**, the backend authenticates via Application Default Credentials (`gcp/client.py` uses
+`ApplicationDefault()`), so pick **one**:
 
-**Console:** the service account → **Keys → Add key → JSON**. Save it as
-`backend/trade-agent-sa-key.json`.
+- **Method A — gcloud ADC (recommended, no key file):** install the gcloud CLI and run
+  `gcloud auth application-default login`. The SDK auto-detects the short-lived credentials it stores;
+  nothing is downloaded and nothing can leak to git. Leave `GOOGLE_APPLICATION_CREDENTIALS` unset.
+- **Method B — downloaded service-account key:** **Console:** the service account → **Keys → Add key →
+  JSON**, saved as `backend/trade-agent-sa-key.json`, then point `GOOGLE_APPLICATION_CREDENTIALS` at it
+  (Step 8). Use this if you prefer a dedicated SA identity or don't want the gcloud CLI locally.
 
-> ⚠️ This file is already blocked by `.gitignore` (`*key*.json`, `*credentials*.json`). Never commit it.
-> Point `GOOGLE_APPLICATION_CREDENTIALS` at it locally (Step 8).
+> ⚠️ The key file (Method B) is already blocked by `.gitignore` (`*key*.json`, `*credentials*.json`).
+> Never commit it. Method A avoids the key entirely and is the safer default.
 
 ---
 
@@ -198,11 +203,11 @@ gcloud artifacts repositories create trade-agent-images \
   --repository-format=docker \
   --location=us-central1 \
   --description="trade-agent backend container images" \
-  --project=trade-agent-a5208
+  --project=trade-agent-ff12a
 ```
 
 The backend image will be pushed to
-`us-central1-docker.pkg.dev/trade-agent-a5208/trade-agent-images/trade-agent-backend`.
+`us-central1-docker.pkg.dev/trade-agent-ff12a/trade-agent-images/trade-agent-backend`.
 
 ---
 
@@ -228,7 +233,7 @@ Copy your **API key** (Pinecone console → API Keys) into `backend/.env` (Step 
 ### `backend/.env` (copy from `backend/.env.example`)
 
 ```bash
-GCP_PROJECT=trade-agent-a5208
+GCP_PROJECT=trade-agent-ff12a
 GCP_REGION=us-central1
 
 # Vertex AI models (GA aliases)
@@ -241,10 +246,13 @@ VERTEX_EMBEDDING_DIM=768
 PINECONE_API_KEY=pc-xxxxxxxxxxxxxxxxxxxx
 PINECONE_INDEX=trade-agent-hts-kb
 
-# $0 zero-trust allowlist (comma-separated, lowercased at boot)
-TRADE_AGENT_ALLOWED_USERS=your-email@gmail.com,tester@gmail.com
+# $0 zero-trust authorization: analyst -> authorized vendor scope, parsed in-memory at boot.
+# Format "email=V-001,V-002;email2=*" (entries split on ';', email/vendors on '=', vendors on ',').
+# A lone '*' grants all vendors (admin). Map keys ARE the identity allowlist (who may use the app).
+TRADE_AGENT_ANALYST_SCOPES=your-email@gmail.com=*;analyst@gmail.com=V-001,V-002
 
-# Local dev only — Cloud Run uses the attached SA instead
+# Local dev only — Cloud Run uses the attached SA instead. Either point this at a downloaded key
+# (Step 5a Method B), or leave it unset and use `gcloud auth application-default login` (Method A).
 GOOGLE_APPLICATION_CREDENTIALS=./trade-agent-sa-key.json
 
 # "local" relaxes CORS to http://localhost:5173; "production" locks to the Hosting origin
@@ -257,8 +265,8 @@ From the Step 3b web-app config:
 
 ```bash
 VITE_FIREBASE_API_KEY=...
-VITE_FIREBASE_AUTH_DOMAIN=trade-agent-a5208.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=trade-agent-a5208
+VITE_FIREBASE_AUTH_DOMAIN=trade-agent-ff12a.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=trade-agent-ff12a
 VITE_FIREBASE_APP_ID=...
 # Cloud Run service URL (filled in after Step 9), or http://127.0.0.1:8000 for local
 VITE_API_BASE_URL=http://127.0.0.1:8000
@@ -277,11 +285,11 @@ the architecture:
 gcloud run deploy trade-agent-backend \
   --source=backend \
   --region=us-central1 \
-  --service-account=trade-agent-platform-access@trade-agent-a5208.iam.gserviceaccount.com \
+  --service-account=trade-agent-platform-access@trade-agent-ff12a.iam.gserviceaccount.com \
   --allow-unauthenticated \
   --min-instances=0 \
-  --set-env-vars="GCP_PROJECT=trade-agent-a5208,APP_ENV=production,..." \
-  --project=trade-agent-a5208
+  --set-env-vars="GCP_PROJECT=trade-agent-ff12a,APP_ENV=production,..." \
+  --project=trade-agent-ff12a
 ```
 
 - `--allow-unauthenticated` is correct here: authorization is **app-level** (Firebase JWT + allowlist),
@@ -293,7 +301,7 @@ gcloud run deploy trade-agent-backend \
 
 ```bash
 # from frontend/, after `pnpm build`
-firebase deploy --only hosting:trade-agent-a5208
+firebase deploy --only hosting:trade-agent-ff12a
 ```
 
 Target bindings live in `.firebaserc` and `firebase.json` (built in the frontend phase).
@@ -302,12 +310,12 @@ Target bindings live in `.firebaserc` and `firebase.json` (built in the frontend
 
 ## 10. Post-setup verification
 
-- [ ] `gcloud config get-value project` → `trade-agent-a5208`
+- [ ] `gcloud config get-value project` → `trade-agent-ff12a`
 - [ ] All 7 APIs from Step 2 show **Enabled** in the console
 - [ ] Firestore database exists in `us-central1` with the three `trade-agent-*` collections
 - [ ] A test user can sign up via the Firebase Auth provider you enabled
 - [ ] The service account has the 5 roles from Step 5
-- [ ] `backend/trade-agent-sa-key.json` exists locally and is **not** tracked by git (`git status` clean)
+- [ ] Local credentials ready: `gcloud auth application-default login` done (Method A), **or** `backend/trade-agent-sa-key.json` exists and is **not** tracked by git (Method B; `git status` clean)
 - [ ] Pinecone index `trade-agent-hts-kb` is **768-dim, cosine, AWS us-east-1**
 - [ ] `backend/.env` and `frontend/.env.local` populated
 

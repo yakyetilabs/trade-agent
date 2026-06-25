@@ -44,3 +44,21 @@ def test_invalid_token_is_rejected_401(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(HTTPException) as exc_info:
         security.verify_authorized_analyst(_creds("forged-token"))
     assert exc_info.value.status_code == 401
+
+
+def test_analyst_can_access_vendor_honors_explicit_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        security, "ANALYST_VENDOR_SCOPES", {"a@x.com": frozenset({"V-001", "V-002"})}
+    )
+    assert security.analyst_can_access_vendor("A@X.com", "V-001") is True  # email case-insensitive
+    assert security.analyst_can_access_vendor("a@x.com", "V-003") is False
+
+
+def test_analyst_can_access_vendor_wildcard_is_admin(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(security, "ANALYST_VENDOR_SCOPES", {"admin@x.com": frozenset({"*"})})
+    assert security.analyst_can_access_vendor("admin@x.com", "V-999") is True
+
+
+def test_analyst_can_access_vendor_unknown_email_denied(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(security, "ANALYST_VENDOR_SCOPES", {})
+    assert security.analyst_can_access_vendor("nobody@x.com", "V-001") is False

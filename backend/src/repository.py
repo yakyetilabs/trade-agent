@@ -92,6 +92,18 @@ def list_shipments_for_vendor(vendor_id: str) -> list[Shipment]:
 
 
 # --- Agent traces --------------------------------------------------------------
+def get_trace(trace_id: str) -> AgentTrace | None:
+    """Fetch a single audit trace by id, or ``None`` if it does not exist.
+
+    Backs the scope check on the human-review disposition endpoint: the reviewer may
+    only act on a draft whose vendor is within their authorized scope.
+    """
+    snapshot = _get_doc(FIRESTORE_TRACES_COLLECTION, trace_id)
+    if not snapshot.exists:
+        return None
+    return AgentTrace.model_validate(snapshot.to_dict() or {})
+
+
 def put_trace(trace: AgentTrace) -> None:
     """Write the single per-run audit document (idempotent on ``trace_id``)."""
     payload: dict[str, object] = trace.model_dump(mode="json")
