@@ -1,0 +1,155 @@
+"""Pydantic v2 domain models for the trade-agent data domains.
+
+Three domains back the persistence layer:
+
+- ``Vendor``   -> Firestore ``trade-agent-Vendors``   (document id = ``vendor_id``)
+- ``Shipment`` -> Firestore ``trade-agent-Shipments`` (document id = ``shipment_id``)
+- ``HtsClause`` -> Pinecone ``trade-agent-hts-kb``     (vector id = ``hts_code``)
+
+All three are populated exclusively from the synthetic generators in
+``src/data/generators.py`` — there is no real trade data anywhere in this repo.
+
+The models are ``frozen`` because these records are immutable reference/seed data:
+generated once, written to a store, and read back. Firestore and the Pinecone
+metadata payload both consume ``model_dump(mode="json")``, which renders the
+``StrEnum`` members as their plain string values.
+"""
+
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
+
+# Document/vector id patterns. These are the *same* shapes the deterministic
+# cross-vendor guard (Phase 3, src/safeguards/cross_vendor_guard.py) matches on:
+# vendors as ``V-\d{3,}`` and shipments as ``S-\d{4,}``. Keeping the generators'
+# ids inside these patterns is asserted by the data tests.
+VENDOR_ID_PATTERN: str = r"^V-\d{3,}$"
+SHIPMENT_ID_PATTERN: str = r"^S-\d{4,}$"
+
+
+class GoodsCategory(StrEnum):
+    """Broad import categories a vendor is scoped to and an HTS clause covers."""
+
+    ELECTRONICS = "electronics"
+    TEXTILES = "textiles"
+    AGRICULTURE = "agriculture"
+    MACHINERY = "machinery"
+    PHARMACEUTICALS = "pharmaceuticals"
+    CHEMICALS = "chemicals"
+
+
+class RestrictionLevel(StrEnum):
+    """Import-restriction disposition carried by an HTS clause.
+
+    ``classify_import_restriction`` (Phase 3) maps a manifest line to one of these
+    by joining on the line's HTS code. ``PROHIBITED`` here means *not admissible
+    without a specific exception* — it is distinct from the pre-agent escalation
+    guard, which intercepts contraband / sanctions signals before the model runs.
+    """
+
+    UNRESTRICTED = "unrestricted"
+    LICENSE_REQUIRED = "license_required"
+    QUOTA_CONTROLLED = "quota_controlled"
+    PROHIBITED = "prohibited"
+
+
+class ShipmentStatus(StrEnum):
+    """Lifecycle state of a shipment in the synthetic manifest store."""
+
+    IN_TRANSIT = "in_transit"
+    HELD = "held"
+    FLAGGED = "flagged"
+    CLEARED = "cleared"
+
+
+class Vendor(BaseModel):
+    """An importer whose scope bounds every tool call made on its behalf."""
+
+    model_config = ConfigDict(frozen=True)
+
+    vendor_id: str = Field(pattern=VENDOR_ID_PATTERN)
+    legal_name: str
+    country: str
+    customs_broker: str
+    categories: tuple[GoodsCategory, ...]
+    active: bool = True
+
+
+class ManifestLineItem(BaseModel):
+    """A single declared line on a shipment's bill of lading."""
+
+    model_config = ConfigDict(frozen=True)
+
+    line_no: int = Field(ge=1)
+    description: str
+    hts_code: str
+    quantity: int = Field(ge=1)
+    unit: str
+    declared_value_usd: float = Field(ge=0)
+    country_of_origin: str
+
+
+class Shipment(BaseModel):
+    """A vendor-scoped import shipment and its declared manifest."""
+
+    model_config = ConfigDict(frozen=True)
+
+    shipment_id: str = Field(pattern=SHIPMENT_ID_PATTERN)
+    vendor_id: str = Field(pattern=VENDOR_ID_PATTERN)
+    bill_of_lading: str
+    carrier: str
+    container_id: str
+    origin_port: str
+    destination_port: str
+    eta: str  # ISO-8601 date (YYYY-MM-DD)
+    status: ShipmentStatus
+    flag_reason: str | None = None
+    manifest: tuple[ManifestLineItem, ...]
+
+
+class HtsClause(BaseModel):
+    """A Harmonized Tariff Schedule clause — one record in the shared KB.
+
+    The KB is public HTS reference text, so it is intentionally *not*
+    vendor-partitioned (see CLAUDE.md / Pinecone notes). ``page_content`` is the
+    text that gets embedded; ``metadata`` is the structured payload Pinecone stores
+    alongside the vector so ``retrieve_tariff_regulation`` can cite a clause by id.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    hts_code: str
+    chapter: int = Field(ge=1, le=99)
+    heading: str
+    title: str
+    category: GoodsCategory
+    duty_rate: str
+    restriction: RestrictionLevel
+    description: str
+    notes: str | None = None
+
+    def page_content(self) -> str:
+        """Render the human-readable clause text used as the embedding input."""
+        lines: list[str] = [
+            f"HTS {self.hts_code} — {self.title}",
+            f"Chapter {self.chapter}: {self.heading}",
+            f"Category: {self.category.value}. Duty rate: {self.duty_rate}. "
+            f"Restriction: {self.restriction.value}.",
+            "",
+            self.description,
+        ]
+        if self.notes:
+            lines.append(f"\nNote: {self.notes}")
+        return "\n".join(lines)
+
+    def metadata(self) -> dict[str, str | int]:
+        """Structured payload stored beside the vector for citation + filtering."""
+        return {
+            "hts_code": self.hts_code,
+            "chapter": self.chapter,
+            "heading": self.heading,
+            "title": self.title,
+            "category": self.category.value,
+            "duty_rate": self.duty_rate,
+            "restriction": self.restriction.value,
+        }

@@ -8,10 +8,15 @@ dependencies = [
     "pydantic>=2.7",
     "firebase-admin>=6.5",
     "google-cloud-firestore>=2.16",
+    # Knowledge-base phase: Vertex embeddings (the embedder) + Pinecone (the dumb
+    # vector bucket), both via their LangChain wrappers. langchain-google-vertexai
+    # pulls in google-cloud-aiplatform (the raw `vertexai` SDK fallback for 768-dim
+    # embeddings); langchain-pinecone pulls in the Pinecone client.
+    "langchain-google-vertexai>=2.0",
+    "langchain-pinecone>=0.2",
 ]
 
-# Heavy AI/runtime deps (vertexai, langgraph, langchain-pinecone) are added in the
-# agent + knowledge-base phases so the Phase 1 skeleton stays lean to install.
+# The LangGraph agent runtime deps are added in the agent phase (Phase 3).
 
 [dependency-groups]
 dev = [

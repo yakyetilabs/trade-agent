@@ -50,3 +50,9 @@ VERTEX_EMBEDDING_DIM: Final[int] = int(os.getenv("VERTEX_EMBEDDING_DIM", "768"))
 
 PINECONE_API_KEY: Final[str] = os.getenv("PINECONE_API_KEY", "")
 PINECONE_INDEX: Final[str] = os.getenv("PINECONE_INDEX", "trade-agent-hts-kb")
+
+# Firestore collection names — fixed, not env-tunable. They carry the mandatory
+# ``trade-agent-`` isolation prefix and are the single source for collection ids.
+FIRESTORE_VENDORS_COLLECTION: Final[str] = "trade-agent-Vendors"
+FIRESTORE_SHIPMENTS_COLLECTION: Final[str] = "trade-agent-Shipments"
+FIRESTORE_TRACES_COLLECTION: Final[str] = "trade-agent-AgentTraces"
