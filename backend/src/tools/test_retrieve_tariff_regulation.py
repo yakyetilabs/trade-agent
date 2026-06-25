@@ -23,9 +23,7 @@ def test_run_retrieve_normalizes_chunks_and_records_trace(
             "duty_rate": "Free",
         },
     )
-    monkeypatch.setattr(
-        retrieve_mod, "_similarity_search", lambda _q, _k: [(document, 0.91)]
-    )
+    monkeypatch.setattr(retrieve_mod, "_similarity_search", lambda _q, _k: [(document, 0.91)])
 
     with trace_context("tr-1", "V-001") as ctx:
         chunks = retrieve_mod.run_retrieve_tariff_regulation("smartphone duty rate")

@@ -73,9 +73,7 @@ def get_current_trace() -> TraceContext | None:
 
 
 @contextmanager
-def record_tool_call(
-    tool_name: str, tool_input: dict[str, object]
-) -> Iterator[dict[str, object]]:
+def record_tool_call(tool_name: str, tool_input: dict[str, object]) -> Iterator[dict[str, object]]:
     """Time a tool invocation and append a :class:`ToolCallLog` on block exit.
 
     Yields a mutable ``output`` dict the caller fills with a summary of what the

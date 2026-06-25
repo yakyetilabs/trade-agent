@@ -69,9 +69,7 @@ def _classify_once(inquiry: str, model_id: str | None) -> _ClassifierOutput:
         "Runnable[LanguageModelInput, _ClassifierOutput]",
         chat.with_structured_output(_ClassifierOutput),
     )
-    return structured.invoke(
-        [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=inquiry)]
-    )
+    return structured.invoke([SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=inquiry)])
 
 
 def _to_classification(parsed: _ClassifierOutput) -> ImportClassification:
