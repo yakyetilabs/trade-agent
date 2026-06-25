@@ -14,9 +14,9 @@ dependencies = [
     # embeddings); langchain-pinecone pulls in the Pinecone client.
     "langchain-google-vertexai>=2.0",
     "langchain-pinecone>=0.2",
+    # Agent phase (Phase 3): LangGraph state machine + ToolRuntime vendor scoping.
+    "langgraph>=0.6",
 ]
-
-# The LangGraph agent runtime deps are added in the agent phase (Phase 3).
 
 [dependency-groups]
 dev = [

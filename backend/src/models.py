@@ -153,3 +153,99 @@ class HtsClause(BaseModel):
             "duty_rate": self.duty_rate,
             "restriction": self.restriction.value,
         }
+
+
+# --- Agent run domain: classification + audit trace ----------------------------
+# These back the agent loop (Phase 3), not the seed data. ``AgentTrace`` is the
+# single audit document written per run to ``trade-agent-AgentTraces``.
+
+
+class InquiryIntent(StrEnum):
+    """The intent of an analyst inquiry.
+
+    The first four are *model-classifiable* — the classifier LLM may emit them.
+    The last two are *system-injected* by the orchestrator/guards and must never
+    be produced by the model (a deterministic guard sets ``cross_vendor_refusal``;
+    the loop sets ``iteration_cap_exceeded`` on a no-draft fallback).
+    """
+
+    TARIFF_LOOKUP = "tariff_lookup"
+    MANIFEST_FLAG_RESOLUTION = "manifest_flag_resolution"
+    CLEARANCE_REQUIREMENTS = "clearance_requirements"
+    UNKNOWN = "unknown"
+    CROSS_VENDOR_REFUSAL = "cross_vendor_refusal"
+    ITERATION_CAP_EXCEEDED = "iteration_cap_exceeded"
+
+
+class TraceDisposition(StrEnum):
+    """Lifecycle state of an agent trace.
+
+    The agent only ever writes ``draft`` or ``escalated``; a human reviewer flips
+    it to ``approved`` or ``rejected`` via the UI (the mandatory human-handoff).
+    """
+
+    DRAFT = "draft"
+    ESCALATED = "escalated"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class ImportClassification(BaseModel):
+    """Hybrid classifier output: routing intent + optional advisory HTS proposal.
+
+    ``intent`` routes the loop. When the inquiry describes goods whose HTS code is
+    missing/vague/disputed, the classifier may also propose ``proposed_hts_heading``
+    and a ``restriction_band`` with a calibrated ``confidence``. The *authoritative*
+    band for an already-declared code still comes from the deterministic catalog
+    join in ``lookup_shipment_manifest`` — these proposal fields are advisory.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    intent: InquiryIntent
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: str
+    proposed_hts_heading: str | None = None
+    restriction_band: RestrictionLevel | None = None
+
+
+class ToolCallLog(BaseModel):
+    """One tool invocation recorded on the run's trace.
+
+    ``input``/``output`` are JSON-scalar dicts (summaries, not raw payloads) so the
+    trace stays compact and renderable. Appended to the ambient trace context by
+    each tool; persisted as an element of ``AgentTrace.tool_calls``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    tool_name: str
+    input: dict[str, object]
+    output: dict[str, object]
+    duration_ms: float = Field(ge=0.0)
+    timestamp: str  # ISO-8601
+
+
+class AgentTrace(BaseModel):
+    """The single audit document written per agent run.
+
+    One document per run (doc id = ``trace_id``) with every tool call embedded in
+    ``tool_calls`` — the granular audit trail the project commits to, recorded as
+    one atomic record rather than a document per call.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    trace_id: str
+    timestamp: str  # ISO-8601 run start
+    vendor_id: str = Field(pattern=VENDOR_ID_PATTERN)
+    user_inquiry: str
+    classification: ImportClassification | None = None
+    tool_calls: tuple[ToolCallLog, ...] = ()
+    draft_response: str | None = None
+    disposition: TraceDisposition
+    model: str
+    escalation_reason: str | None = None
+    # Aggregate token/latency metadata for the AgentOps surface.
+    duration_ms: float | None = None
+    total_tokens: int | None = None
