@@ -4,11 +4,16 @@ import pytest
 from pydantic import ValidationError
 
 from src.models import (
+    AgentTrace,
     GoodsCategory,
     HtsClause,
+    ImportClassification,
+    InquiryIntent,
     RestrictionLevel,
     Shipment,
     ShipmentStatus,
+    ToolCallLog,
+    TraceDisposition,
     Vendor,
 )
 
@@ -85,3 +90,66 @@ def test_models_are_frozen() -> None:
     )
     with pytest.raises(ValidationError):
         vendor.legal_name = "Mutated"  # type: ignore[misc]
+
+
+def test_classification_confidence_is_bounded() -> None:
+    with pytest.raises(ValidationError):
+        ImportClassification(
+            intent=InquiryIntent.TARIFF_LOOKUP, confidence=1.5, reasoning="too high"
+        )
+
+
+def test_classification_proposal_fields_default_to_none() -> None:
+    clf = ImportClassification(
+        intent=InquiryIntent.MANIFEST_FLAG_RESOLUTION,
+        confidence=0.9,
+        reasoning="flagged line",
+    )
+    assert clf.proposed_hts_heading is None
+    assert clf.restriction_band is None
+
+
+def test_agent_trace_round_trips_through_json_dump() -> None:
+    trace = AgentTrace(
+        trace_id="tr-123",
+        timestamp="2026-06-25T00:00:00Z",
+        vendor_id="V-002",
+        user_inquiry="Why is my shipment held?",
+        classification=ImportClassification(
+            intent=InquiryIntent.MANIFEST_FLAG_RESOLUTION,
+            confidence=0.88,
+            reasoning="references a held shipment",
+        ),
+        tool_calls=(
+            ToolCallLog(
+                tool_name="lookup_shipment_manifest",
+                input={"shipment_id": "S-1001"},
+                output={"count": 1, "scope_violation": False},
+                duration_ms=12.5,
+                timestamp="2026-06-25T00:00:01Z",
+            ),
+        ),
+        draft_response="Draft text.",
+        disposition=TraceDisposition.DRAFT,
+        model="gemini-2.5-flash",
+    )
+    dumped = trace.model_dump(mode="json")
+    # Enums serialize to plain strings; nested models to dicts; tuples to lists.
+    assert dumped["disposition"] == "draft"
+    assert dumped["classification"]["intent"] == "manifest_flag_resolution"
+    assert isinstance(dumped["tool_calls"], list)
+    assert dumped["tool_calls"][0]["tool_name"] == "lookup_shipment_manifest"
+    # And it validates back into an equal model.
+    assert AgentTrace.model_validate(dumped) == trace
+
+
+def test_agent_trace_rejects_malformed_vendor_id() -> None:
+    with pytest.raises(ValidationError):
+        AgentTrace(
+            trace_id="tr-1",
+            timestamp="2026-06-25T00:00:00Z",
+            vendor_id="VENDOR-2",  # must match V-\d{3,}
+            user_inquiry="x",
+            disposition=TraceDisposition.ESCALATED,
+            model="gemini-2.5-flash",
+        )

@@ -40,7 +40,7 @@ APP_ENV: Final[AppEnv] = _normalize_app_env(_RAW_APP_ENV)
 ALLOWED_USERS: Final[frozenset[str]] = parse_allowlist(_RAW_ALLOWED_USERS)
 CORS_ORIGINS: Final[tuple[str, ...]] = resolve_cors_origins(APP_ENV, _RAW_PROD_ORIGIN)
 
-GCP_PROJECT: Final[str] = os.getenv("GCP_PROJECT", "trade-agent-demo")
+GCP_PROJECT: Final[str] = os.getenv("GCP_PROJECT", "trade-agent-a5208")
 GCP_REGION: Final[str] = os.getenv("GCP_REGION", "us-central1")
 
 VERTEX_PRIMARY_MODEL: Final[str] = os.getenv("VERTEX_PRIMARY_MODEL", "gemini-2.5-flash")
