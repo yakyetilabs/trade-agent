@@ -176,16 +176,21 @@ gcloud projects add-iam-policy-binding trade-agent-a5208 \
 > The `logging.viewer` grant is the deliberately-not-least-privilege bit called out in
 > `DESIGN_DECISIONS.md` §8 — minor logging read for rapid operator debugging.
 
-### 5a. Key for local development only
+### 5a. Local development credentials
 
 Cloud Run uses the attached service account automatically (no key needed in production). For **local
-dev**, download a key:
+dev**, the backend authenticates via Application Default Credentials (`gcp/client.py` uses
+`ApplicationDefault()`), so pick **one**:
 
-**Console:** the service account → **Keys → Add key → JSON**. Save it as
-`backend/trade-agent-sa-key.json`.
+- **Method A — gcloud ADC (recommended, no key file):** install the gcloud CLI and run
+  `gcloud auth application-default login`. The SDK auto-detects the short-lived credentials it stores;
+  nothing is downloaded and nothing can leak to git. Leave `GOOGLE_APPLICATION_CREDENTIALS` unset.
+- **Method B — downloaded service-account key:** **Console:** the service account → **Keys → Add key →
+  JSON**, saved as `backend/trade-agent-sa-key.json`, then point `GOOGLE_APPLICATION_CREDENTIALS` at it
+  (Step 8). Use this if you prefer a dedicated SA identity or don't want the gcloud CLI locally.
 
-> ⚠️ This file is already blocked by `.gitignore` (`*key*.json`, `*credentials*.json`). Never commit it.
-> Point `GOOGLE_APPLICATION_CREDENTIALS` at it locally (Step 8).
+> ⚠️ The key file (Method B) is already blocked by `.gitignore` (`*key*.json`, `*credentials*.json`).
+> Never commit it. Method A avoids the key entirely and is the safer default.
 
 ---
 
@@ -241,10 +246,13 @@ VERTEX_EMBEDDING_DIM=768
 PINECONE_API_KEY=pc-xxxxxxxxxxxxxxxxxxxx
 PINECONE_INDEX=trade-agent-hts-kb
 
-# $0 zero-trust allowlist (comma-separated, lowercased at boot)
-TRADE_AGENT_ALLOWED_USERS=your-email@gmail.com,tester@gmail.com
+# $0 zero-trust authorization: analyst -> authorized vendor scope, parsed in-memory at boot.
+# Format "email=V-001,V-002;email2=*" (entries split on ';', email/vendors on '=', vendors on ',').
+# A lone '*' grants all vendors (admin). Map keys ARE the identity allowlist (who may use the app).
+TRADE_AGENT_ANALYST_SCOPES=your-email@gmail.com=*;analyst@gmail.com=V-001,V-002
 
-# Local dev only — Cloud Run uses the attached SA instead
+# Local dev only — Cloud Run uses the attached SA instead. Either point this at a downloaded key
+# (Step 5a Method B), or leave it unset and use `gcloud auth application-default login` (Method A).
 GOOGLE_APPLICATION_CREDENTIALS=./trade-agent-sa-key.json
 
 # "local" relaxes CORS to http://localhost:5173; "production" locks to the Hosting origin
@@ -307,7 +315,7 @@ Target bindings live in `.firebaserc` and `firebase.json` (built in the frontend
 - [ ] Firestore database exists in `us-central1` with the three `trade-agent-*` collections
 - [ ] A test user can sign up via the Firebase Auth provider you enabled
 - [ ] The service account has the 5 roles from Step 5
-- [ ] `backend/trade-agent-sa-key.json` exists locally and is **not** tracked by git (`git status` clean)
+- [ ] Local credentials ready: `gcloud auth application-default login` done (Method A), **or** `backend/trade-agent-sa-key.json` exists and is **not** tracked by git (Method B; `git status` clean)
 - [ ] Pinecone index `trade-agent-hts-kb` is **768-dim, cosine, AWS us-east-1**
 - [ ] `backend/.env` and `frontend/.env.local` populated
 
