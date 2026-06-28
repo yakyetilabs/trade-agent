@@ -142,6 +142,7 @@ class AgentResult(BaseModel):
     duration_ms: float
     model: str
     escalation_reason: str | None = None
+    total_tokens: int | None = None
 
 
 def _build_agent(model_id: str) -> CompiledStateGraph[Any, VendorContext, Any, Any]:
@@ -227,6 +228,7 @@ def _persist(trace: AgentTrace) -> AgentResult:
         duration_ms=trace.duration_ms or 0.0,
         model=trace.model,
         escalation_reason=trace.escalation_reason,
+        total_tokens=trace.total_tokens,
     )
 
 

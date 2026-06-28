@@ -33,7 +33,7 @@ package = false
 [tool.pytest.ini_options]
 # Run from backend/ so `src.` imports resolve; co-located test_*.py files.
 pythonpath = ["."]
-testpaths = ["src"]
+testpaths = ["src", "eval"]
 python_files = ["test_*.py"]
 
 [tool.ruff]

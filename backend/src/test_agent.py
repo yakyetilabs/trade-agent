@@ -225,6 +225,7 @@ def test_normal_run_extracts_classification_draft_and_tokens(
     assert result.draft_response is not None
     assert result.draft_response.startswith("Shipment S-1001 is held")
     assert result.tool_call_count == 4
+    assert result.total_tokens == 140  # token aggregate surfaced on the result (cost axis)
     assert result.tool_names == [
         "classify_import_restriction",
         "lookup_shipment_manifest",
