@@ -63,7 +63,7 @@ ANALYST_VENDOR_SCOPES: Final[dict[str, frozenset[str]]] = parse_analyst_scopes(_
 ALLOWED_USERS: Final[frozenset[str]] = frozenset(ANALYST_VENDOR_SCOPES.keys())
 CORS_ORIGINS: Final[tuple[str, ...]] = resolve_cors_origins(APP_ENV, _RAW_PROD_ORIGIN)
 
-GCP_PROJECT: Final[str] = os.getenv("GCP_PROJECT", "trade-agent-a5208")
+GCP_PROJECT: Final[str] = os.getenv("GCP_PROJECT", "trade-agent-ff12a")
 GCP_REGION: Final[str] = os.getenv("GCP_REGION", "us-central1")
 
 VERTEX_PRIMARY_MODEL: Final[str] = os.getenv("VERTEX_PRIMARY_MODEL", "gemini-2.5-flash")

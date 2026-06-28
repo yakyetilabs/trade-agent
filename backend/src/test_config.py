@@ -29,8 +29,8 @@ def test_resolve_cors_origins_local_permits_vite() -> None:
 
 
 def test_resolve_cors_origins_production_locks_to_prod_origin() -> None:
-    assert resolve_cors_origins("production", "https://trade-agent-a5208.web.app") == (
-        "https://trade-agent-a5208.web.app",
+    assert resolve_cors_origins("production", "https://trade-agent-ff12a.web.app") == (
+        "https://trade-agent-ff12a.web.app",
     )
 
 
