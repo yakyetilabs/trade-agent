@@ -1,13 +1,9 @@
-"""Vertex AI text-embeddings adapter (google-genai, explicit dimensionality).
+"""Vertex AI text-embeddings adapter: a thin LangChain ``Embeddings`` over
+google-genai's ``embed_content`` on Vertex AI.
 
-A thin LangChain ``Embeddings`` over the unified ``google-genai`` SDK pointed at
-Vertex AI. Calling ``embed_content`` directly (instead of a higher-level wrapper)
-lets us pin ``output_dimensionality`` explicitly, so the vector width always matches
-the fixed Pinecone index, and set the retrieval ``task_type`` per call -
-``RETRIEVAL_DOCUMENT`` at ingest, ``RETRIEVAL_QUERY`` at search - for better recall.
-
-The model and dimension come from ``config.py`` (the single source of truth); the
-google-genai client is the shared singleton in ``gcp/client.py``.
+Why the raw call (explicit width + per-call task type) and how it feeds the
+single-dense retrieval path: see the Retrieval section (§8) in
+``docs/DESIGN_DECISIONS.md``.
 """
 
 from google.genai.types import EmbedContentConfig
@@ -25,6 +21,9 @@ class VertexEmbeddings(Embeddings):
             model=VERTEX_EMBEDDING_MODEL,
             contents=list(texts),
             config=EmbedContentConfig(
+                # Pin the output width explicitly: the GoogleGenerativeAIEmbeddings
+                # wrapper defaults to 3072, which would silently mismatch the fixed
+                # Pinecone index.
                 output_dimensionality=VERTEX_EMBEDDING_DIM,
                 task_type=task_type,
             ),
@@ -40,6 +39,8 @@ class VertexEmbeddings(Embeddings):
             vectors.append(list(embedding.values))
         return vectors
 
+    # Documents and queries must embed under DIFFERENT task types; using one type
+    # for both measurably degrades retrieval recall.
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of documents (RETRIEVAL_DOCUMENT)."""
         return self._embed(list(texts), "RETRIEVAL_DOCUMENT")
