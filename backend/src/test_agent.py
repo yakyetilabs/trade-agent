@@ -1,6 +1,6 @@
 """Unit tests for the run_agent orchestrator.
 
-Hermetic by construction: the model is never built or called. ``_build_agent`` is
+Hermetic by construction: the model is never built or called. ``build_agent`` is
 replaced with a fake whose ``invoke`` appends tool calls to the ambient trace via the
 same ``record_tool_call`` seam the real tools use, so the orchestrator's extraction,
 fallback, and trace-persistence logic is exercised exactly as it would be live — with
@@ -106,7 +106,7 @@ def _draft_spec(text: str) -> _ToolCallSpec:
 
 
 def _install_agent(monkeypatch: pytest.MonkeyPatch, fake: _FakeAgent) -> None:
-    monkeypatch.setattr(agent, "_build_agent", lambda _model_id: fake)
+    monkeypatch.setattr(agent, "build_agent", lambda _model_id: fake)
 
 
 def _explode_if_built(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,7 +115,7 @@ def _explode_if_built(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(_model_id: str) -> object:
         raise AssertionError("the agent must not be built on this path")
 
-    monkeypatch.setattr(agent, "_build_agent", _boom)
+    monkeypatch.setattr(agent, "build_agent", _boom)
 
 
 def _capture_traces(monkeypatch: pytest.MonkeyPatch) -> list[AgentTrace]:
@@ -229,7 +229,12 @@ def test_normal_run_extracts_classification_draft_and_tokens(
     assert result.draft_response is not None
     assert result.draft_response.startswith("Shipment S-1001 is held")
     assert result.tool_call_count == 4
-    assert result.total_tokens == 140  # token aggregate surfaced on the result (cost axis)
+    # Billable token split surfaced on the result (cost axis). No reasoning detail on
+    # this message, so thoughts is 0; prompt + output == total.
+    assert result.prompt_tokens == 100
+    assert result.output_tokens == 40
+    assert result.thoughts_tokens == 0
+    assert result.total_tokens == 140
     assert result.tool_names == [
         "classify_import_restriction",
         "lookup_shipment_manifest",
@@ -239,12 +244,65 @@ def test_normal_run_extracts_classification_draft_and_tokens(
     # Vendor scope is bound into runtime context, never a model-facing arg; the cap is applied.
     assert fake.invoked_with is not None
     assert fake.invoked_with["context"] == {"vendor_id": "V-001"}
-    assert fake.invoked_with["config"] == {"recursion_limit": agent._RECURSION_LIMIT}
-    # Exactly one trace persisted, carrying the embedded tool calls and token aggregate.
+    assert fake.invoked_with["config"] == {"recursion_limit": agent.RECURSION_LIMIT}
+    # Exactly one trace persisted, carrying the embedded tool calls and token split.
     assert len(captured) == 1
     assert len(captured[0].tool_calls) == 4
+    assert captured[0].prompt_tokens == 100
+    assert captured[0].output_tokens == 40
+    assert captured[0].thoughts_tokens == 0
     assert captured[0].total_tokens == 140
     assert captured[0].duration_ms is not None
+
+
+def test_token_split_folds_thoughts_and_sums_across_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Thinking tokens are kept as a sub-split of output, summed over all AI messages.
+
+    On Vertex thinking bills at the OUTPUT rate, so output_tokens already includes the
+    reasoning tokens (output_token_details.reasoning) and prompt + output == total. Two
+    AI messages (a tool-call turn then the final turn) exercise the per-field summing.
+    """
+    _vendor_exists(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    captured = _capture_traces(monkeypatch)
+
+    fake = _FakeAgent(
+        calls=[_classify_spec(), _draft_spec("Grounded draft citing HTS 8517.13.0000.")],
+        messages=[
+            AIMessage(
+                content="",
+                usage_metadata={
+                    "input_tokens": 200,
+                    "output_tokens": 90,  # 60 visible + 30 thinking
+                    "total_tokens": 290,
+                    "output_token_details": {"reasoning": 30},
+                },
+            ),
+            AIMessage(
+                content="done",
+                usage_metadata={
+                    "input_tokens": 50,
+                    "output_tokens": 20,  # 15 visible + 5 thinking
+                    "total_tokens": 70,
+                    "output_token_details": {"reasoning": 5},
+                },
+            ),
+        ],
+    )
+    _install_agent(monkeypatch, fake)
+
+    result = agent.run_agent("V-001", "What duty applies to my declared electronics?")
+
+    assert result.prompt_tokens == 250
+    assert result.output_tokens == 110  # 90 + 20, thoughts already folded in
+    assert result.thoughts_tokens == 35  # 30 + 5
+    assert result.total_tokens == 360  # 290 + 70 == prompt + output
+    assert result.prompt_tokens + result.output_tokens == result.total_tokens
+    assert len(captured) == 1
+    assert captured[0].thoughts_tokens == 35
+    assert captured[0].output_tokens == 110
 
 
 # --- (6) No-draft fallback ------------------------------------------------------
@@ -303,7 +361,7 @@ def test_build_agent_binds_vendor_context_and_the_four_tools(
 ) -> None:
     """The real create_agent graph carries the vendor context schema and the four tools.
 
-    Unlike the orchestrator tests above (which replace ``_build_agent`` wholesale), this
+    Unlike the orchestrator tests above (which replace ``build_agent`` wholesale), this
     builds the ACTUAL agent graph; only the chat model is swapped for a credential-free
     fake, so no Vertex SDK init or network call happens. It is the security-critical
     wiring check the faked tests cannot make: vendor scope must ride in the runtime
@@ -312,7 +370,7 @@ def test_build_agent_binds_vendor_context_and_the_four_tools(
     fake_model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
     monkeypatch.setattr(agent, "ChatGoogleGenerativeAI", lambda **_kwargs: fake_model)
 
-    compiled = agent._build_agent("gemini-2.5-flash")
+    compiled = agent.build_agent("gemini-2.5-flash")
 
     assert isinstance(compiled, CompiledStateGraph)
     # Vendor scope is bound as runtime context: the load-bearing isolation guarantee.

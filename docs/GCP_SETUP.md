@@ -306,6 +306,20 @@ firebase deploy --only hosting:trade-agent-ff12a
 
 Target bindings live in `.firebaserc` and `firebase.json` (built in the frontend phase).
 
+**Same-origin API via a Hosting rewrite (the chosen wiring - see `DESIGN_DECISIONS.md` §9).**
+`firebase.json` proxies `/api/**` to the Cloud Run service so the SPA and the API share one origin and the production path carries no CORS:
+
+```json
+"hosting": {
+  "rewrites": [
+    { "source": "/api/**", "run": { "serviceId": "trade-agent-backend", "region": "us-central1" } },
+    { "source": "**", "destination": "/index.html" }
+  ]
+}
+```
+
+Two consequences for later phases: the frontend calls a relative `/api` path (no `VITE_API_BASE_URL` pointed at a raw `*.run.app` URL), and the backend must set `Cache-Control: private, no-store` on authenticated responses so the Hosting CDN never caches one analyst's vendor-scoped data. Local dev reproduces the same route with the Vite dev-server proxy, so neither environment needs a cross-origin grant. This is a Hosting feature, not a load balancer, so it adds no fixed cost and respects the no-IAP/no-LB rule.
+
 ---
 
 ## 10. Post-setup verification

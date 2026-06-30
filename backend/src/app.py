@@ -10,6 +10,7 @@ behind two layers of the security boundary:
    query, list, audit, and dispose of records for vendors in their authorized scope:
 
 - ``POST /api/inquiry``                       run the agent (403 + audit log if out of scope)
+- ``POST /api/inquiry/stream``                run the agent with Layer-1 SSE progress (same gate)
 - ``GET  /api/vendors``                       the analyst's authorized vendors (the picker)
 - ``GET  /api/traces``                        recent audit traces, filtered to that scope
 - ``POST /api/traces/{trace_id}/disposition`` human approve/reject (scoped to the trace's vendor)
@@ -19,10 +20,12 @@ client-supplied claim — so the dropdown filtering is UX and these checks are t
 """
 
 import logging
+from collections.abc import AsyncIterator
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src import repository
@@ -30,6 +33,7 @@ from src.agent import AgentResult, UnknownVendorError, run_agent
 from src.config import APP_ENV, CORS_ORIGINS, VERTEX_PRIMARY_MODEL
 from src.models import VENDOR_ID_PATTERN, AgentTrace, TraceDisposition, Vendor
 from src.security import analyst_can_access_vendor, verify_authorized_analyst
+from src.streaming import sse_format, stream_agent_run
 
 _logger = logging.getLogger(__name__)
 
@@ -133,6 +137,45 @@ def submit_inquiry(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unknown vendor: {exc.vendor_id}",
         ) from exc
+
+
+@app.post("/api/inquiry/stream")
+async def submit_inquiry_stream(
+    request: InquiryRequest,
+    analyst_email: str = Depends(verify_authorized_analyst),
+) -> StreamingResponse:
+    """Layer-1 streaming variant of ``POST /api/inquiry``: the same auth and vendor-scope
+    gate, then a ``text/event-stream`` of pipeline progress that ends in a ``done`` event
+    carrying the ``AgentResult`` (see ``src/streaming.py`` for the event contract).
+
+    The out-of-scope refusal is a plain 403 *before* the stream opens - identical to the
+    non-streaming path and its scope-violation audit log. Once streaming, an unknown vendor
+    or an unexpected failure surfaces as a terminal ``error`` event (the status is already
+    200). The authenticated stream carries ``Cache-Control: no-store`` - it sits behind the
+    Hosting CDN in production.
+    """
+    if not analyst_can_access_vendor(analyst_email, request.vendor_id):
+        _logger.warning(
+            "scope_violation: analyst=%s requested vendor=%s outside authorized scope (stream)",
+            analyst_email,
+            request.vendor_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized for the requested vendor scope.",
+        )
+
+    async def _events() -> AsyncIterator[str]:
+        async for event in stream_agent_run(request.vendor_id, request.inquiry):
+            yield sse_format(event)
+
+    return StreamingResponse(
+        _events(),
+        media_type="text/event-stream",
+        # no-store: authenticated payload behind the Hosting CDN. X-Accel-Buffering=no asks any
+        # intermediary proxy not to buffer, so stages arrive live (confirmed end-to-end in F5).
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/vendors", response_model=list[Vendor])

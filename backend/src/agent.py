@@ -1,37 +1,43 @@
-"""Agent orchestrator — the deterministic run pipeline around the LLM loop.
+"""Agent orchestrator - the deterministic run pipeline around the LLM loop.
 
-``run_agent`` is the single entry point the API (and the Phase 4 eval suite) call.
-It runs a fixed seven-step sequence; the model only ever executes inside step 5,
-and only after the two pre-model guards have cleared the inquiry:
+``run_agent`` is the synchronous entry point the API's non-streaming path and the
+Phase 4 eval suite call; :func:`src.streaming.stream_agent_run` is the async, SSE-emitting
+variant. Both drive the SAME fixed pipeline, factored here into reusable steps so the two
+runners share one implementation and persist one identical :class:`~src.models.AgentTrace`:
 
-1. **Escalation guard** — severe trade-security signals (contraband / sanctions /
-   federal seizure / bribery) route straight to a human queue. The model never runs.
-2. **Cross-vendor guard** — references to another vendor's ids are refused with a
-   deterministic draft. The model never runs.
-3. **Vendor resolution** — an unknown ``vendor_id`` raises :class:`UnknownVendorError`
-   (the API maps it to 404). This is the only step that can reject a well-formed run.
-4. **Build** a fresh tool-calling agent (Gemini Flash, ``temperature=0``) bound to the
-   :class:`~src.tools.vendor_context.VendorContext` schema. A new chat model is built
-   per run — chat models carry per-invocation tool bindings and must not be memoized;
-   the Vertex SDK init is the singleton.
-5. **Invoke** the agent inside a :func:`~src.tracing.trace_context.trace_context` so
-   every tool call appends to one ambient trace. The whole run is synchronous, so the
-   ``ContextVar`` is shared across the tool calls without any thread-hop bookkeeping.
-6. **Fallback** — if the loop ends without a grounded draft (it errored, hit the
-   recursion cap, or simply never called ``draft_clearance_response``), substitute a
-   safe fallback draft and mark the run ``iteration_cap_exceeded``.
-7. **Persist** exactly one :class:`~src.models.AgentTrace` (tools only accumulate; the
-   orchestrator writes), then project it to the lean :class:`AgentResult` the API returns.
+1. :func:`new_run` - mint the run identity (trace id, timestamp, model, start clock).
+2. :func:`run_pre_model_guards` - the two deterministic pre-model guards. Severe
+   trade-security signals (contraband / sanctions / seizure / bribery) and cross-vendor
+   references short-circuit to an audited trace; the model never runs.
+3. **Vendor resolution** - an unknown ``vendor_id`` is a hard reject (404 on the sync path,
+   a terminal ``error`` event on the stream). The only step that rejects a well-formed run.
+4. :func:`build_agent` - a fresh tool-calling agent (Gemini Flash, ``temperature=0``) bound
+   to the :class:`~src.tools.vendor_context.VendorContext` schema. Built per run - chat
+   models carry per-invocation tool bindings and must not be memoized; the Vertex SDK init
+   is the singleton.
+5. **Invoke** - the runner drives the agent inside a
+   :func:`~src.tracing.trace_context.trace_context` so every tool call appends to one
+   ambient trace. ``run_agent`` invokes synchronously; ``stream_agent_run`` drives the same
+   graph via ``astream_events`` and maps each tool's start/stop to a stage event. The trace
+   ``ContextVar`` (and the vendor runtime context) propagate into the tools whether they run
+   inline (sync) or on a worker thread (async driver).
+6. :func:`build_run_trace` - recover the classification and draft from the recorded tool
+   calls; if the loop ended without a grounded draft (it errored, hit the recursion cap, or
+   never called ``draft_clearance_response``), substitute a safe fallback draft and mark the
+   run ``iteration_cap_exceeded``.
+7. :func:`persist_result` - write exactly one :class:`~src.models.AgentTrace`, then project
+   it to the lean :class:`AgentResult` the API returns.
 
 The vendor scope is resolved here and bound into the runtime *context*, never into a
-model-facing argument — the LLM has no slot to inject or override which vendor it sees.
+model-facing argument - the LLM has no slot to inject or override which vendor it sees.
 """
 
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal, NamedTuple
 
 from langchain.agents import create_agent
 from langchain_core.messages import BaseMessage, HumanMessage
@@ -63,7 +69,7 @@ _logger = logging.getLogger(__name__)
 # normal flow (classify -> lookup -> retrieve -> draft = 4 rounds) is ~9 supersteps.
 # 14 leaves headroom for ~2 extra rounds (e.g. a re-retrieve) before the loop is
 # capped and the step-6 fallback fires.
-_RECURSION_LIMIT = 14
+RECURSION_LIMIT = 14
 
 _FALLBACK_DRAFT = (
     "The assistant could not complete a grounded clearance response for this inquiry "
@@ -142,10 +148,110 @@ class AgentResult(BaseModel):
     duration_ms: float
     model: str
     escalation_reason: str | None = None
+    # Billable token split (see _TokenUsage / AgentTrace): output_tokens includes
+    # thoughts_tokens and prompt + output == total.
+    prompt_tokens: int | None = None
+    output_tokens: int | None = None
+    thoughts_tokens: int | None = None
     total_tokens: int | None = None
 
 
-def _build_agent(model_id: str) -> CompiledStateGraph[Any, VendorContext, Any, Any]:
+@dataclass(frozen=True)
+class RunMeta:
+    """Per-run identity and timing, threaded through the shared pipeline steps."""
+
+    trace_id: str
+    timestamp: str  # ISO-8601 run start
+    vendor_id: str
+    inquiry: str
+    model: str
+    started: float  # time.perf_counter() at run start, for the duration metric
+
+
+def new_run(vendor_id: str, inquiry: str, model_id: str | None) -> RunMeta:
+    """Mint a fresh run identity. ``model_id`` overrides the primary model (the eval seam)."""
+    return RunMeta(
+        trace_id=f"tr-{uuid.uuid4().hex}",
+        timestamp=datetime.now(UTC).isoformat(),
+        vendor_id=vendor_id,
+        inquiry=inquiry,
+        model=model_id or VERTEX_PRIMARY_MODEL,
+        started=time.perf_counter(),
+    )
+
+
+def _elapsed_ms(meta: RunMeta) -> float:
+    """Wall-clock milliseconds since the run started - the trace's latency metric."""
+    return (time.perf_counter() - meta.started) * 1000.0
+
+
+# The SSE ``guard_triggered`` vocabulary, owned here (the lower module) so the streaming
+# protocol can reuse it without an import cycle. These are the two deterministic guards.
+GuardKind = Literal["escalation", "cross_vendor"]
+
+
+@dataclass(frozen=True)
+class PreModelGuard:
+    """A deterministic pre-model short-circuit: the audit trace to persist plus the
+    SSE-facing guard signal (``kind`` + ``reason``). The model is never built or called."""
+
+    trace: AgentTrace
+    kind: GuardKind
+    reason: str | None
+
+
+def run_pre_model_guards(meta: RunMeta) -> PreModelGuard | None:
+    """Run the two deterministic guards (escalation, then cross-vendor) in order.
+
+    Returns the short-circuit trace + signal if either fires, else ``None``. Both build a
+    complete :class:`~src.models.AgentTrace` so a guarded run is audited identically to one
+    that reached the model - the audit signal a reviewer expects to stay at zero.
+    """
+    escalation = should_escalate(meta.inquiry)
+    if escalation.escalate:
+        return PreModelGuard(
+            trace=AgentTrace(
+                trace_id=meta.trace_id,
+                timestamp=meta.timestamp,
+                vendor_id=meta.vendor_id,
+                user_inquiry=meta.inquiry,
+                disposition=TraceDisposition.ESCALATED,
+                model=meta.model,
+                escalation_reason=escalation.reason,
+                duration_ms=_elapsed_ms(meta),
+            ),
+            kind="escalation",
+            reason=escalation.reason,
+        )
+
+    cross_vendor = detect_cross_vendor_reference(
+        meta.vendor_id, meta.inquiry, repository.get_shipment_owner
+    )
+    if cross_vendor.is_violation:
+        refusal = ImportClassification(
+            intent=InquiryIntent.CROSS_VENDOR_REFUSAL,
+            confidence=1.0,
+            reasoning=cross_vendor.reason or "Cross-vendor reference detected.",
+        )
+        return PreModelGuard(
+            trace=AgentTrace(
+                trace_id=meta.trace_id,
+                timestamp=meta.timestamp,
+                vendor_id=meta.vendor_id,
+                user_inquiry=meta.inquiry,
+                classification=refusal,
+                draft_response=_CROSS_VENDOR_REFUSAL_DRAFT,
+                disposition=TraceDisposition.DRAFT,
+                model=meta.model,
+                duration_ms=_elapsed_ms(meta),
+            ),
+            kind="cross_vendor",
+            reason=cross_vendor.reason,
+        )
+    return None
+
+
+def build_agent(model_id: str) -> CompiledStateGraph[Any, VendorContext, Any, Any]:
     """Construct a fresh tool-calling agent bound to the vendor-context schema.
 
     Built with :func:`langchain.agents.create_agent` (the LangChain 1.0 successor to the
@@ -202,106 +308,59 @@ def _extract_draft(tool_calls: tuple[ToolCallLog, ...]) -> str | None:
     return draft
 
 
-def _sum_tokens(messages: list[BaseMessage]) -> int | None:
-    """Best-effort total-token aggregate across the run's AI messages."""
-    total = 0
+class _TokenUsage(NamedTuple):
+    """The run's billable token split, summed across its AI messages.
+
+    Sourced from each message's standardized ``usage_metadata`` (langchain-core), which
+    ``langchain-google-genai`` fills from the native Vertex counts: ``input_tokens`` <-
+    ``prompt_token_count`` and ``output_tokens`` <- ``candidates_token_count +
+    thoughts_token_count``. On Vertex thinking bills at the OUTPUT rate, so
+    ``output_tokens`` already folds in ``thoughts_tokens`` and ``prompt + output ==
+    total``. The native counts are NOT exposed on ``response_metadata`` for this
+    non-streaming invoke path, so ``usage_metadata`` is the source of record.
+    """
+
+    prompt_tokens: int
+    output_tokens: int
+    thoughts_tokens: int
+    total_tokens: int
+
+
+def _sum_tokens(messages: list[BaseMessage]) -> _TokenUsage | None:
+    """Aggregate the billable token split across the run's AI messages.
+
+    ``None`` when no message carried usage (e.g. a faked or usage-less run), which keeps
+    the trace's token fields ``None`` rather than a misleading all-zero split.
+
+    The ``messages`` are the agent graph's final ``state["messages"]`` (the streaming
+    runner captures the same list from the root ``on_chain_end`` event), so a tool's own
+    internal model call - e.g. ``classify_import_restriction``'s structured-output call -
+    is excluded from the sum, exactly as on the synchronous path.
+    """
+    prompt = output = thoughts = total = 0
     found = False
     for message in messages:
         usage = getattr(message, "usage_metadata", None)
-        if usage:
-            total += int(usage.get("total_tokens", 0))
-            found = True
-    return total if found else None
+        if not usage:
+            continue
+        found = True
+        prompt += int(usage.get("input_tokens", 0))
+        output += int(usage.get("output_tokens", 0))
+        total += int(usage.get("total_tokens", 0))
+        thoughts += int((usage.get("output_token_details") or {}).get("reasoning", 0))
+    return _TokenUsage(prompt, output, thoughts, total) if found else None
 
 
-def _persist(trace: AgentTrace) -> AgentResult:
-    """Write the single audit document and project it to the lean API result."""
-    repository.put_trace(trace)
-    return AgentResult(
-        trace_id=trace.trace_id,
-        disposition=trace.disposition,
-        draft_response=trace.draft_response,
-        classification=trace.classification,
-        tool_call_count=len(trace.tool_calls),
-        tool_names=[call.tool_name for call in trace.tool_calls],
-        duration_ms=trace.duration_ms or 0.0,
-        model=trace.model,
-        escalation_reason=trace.escalation_reason,
-        total_tokens=trace.total_tokens,
-    )
-
-
-def run_agent(vendor_id: str, inquiry: str, model_id: str | None = None) -> AgentResult:
-    """Run the seven-step pipeline for one analyst inquiry and persist its audit trace.
-
-    ``vendor_id`` is the deterministically resolved scope (validated against the
-    allowlist and dropdown upstream); ``inquiry`` is the analyst's raw question.
-    ``model_id`` overrides the primary model — used by the Phase 4 Flash-vs-Pro eval.
+def build_run_trace(
+    meta: RunMeta,
+    tool_calls: tuple[ToolCallLog, ...],
+    result_messages: list[BaseMessage],
+    invoke_error: Exception | None,
+) -> AgentTrace:
+    """Steps 6-7 (trace assembly): recover the classification + draft from the recorded
+    tool calls, apply the no-draft fallback, sum the billable tokens, and assemble the
+    single audit trace. Shared by the sync and streaming runners; the caller persists it.
     """
-    started = time.perf_counter()
-    trace_id = f"tr-{uuid.uuid4().hex}"
-    timestamp = datetime.now(UTC).isoformat()
-    model = model_id or VERTEX_PRIMARY_MODEL
-
-    # (1) Escalation guard — severe security signals never reach the model.
-    escalation = should_escalate(inquiry)
-    if escalation.escalate:
-        return _persist(
-            AgentTrace(
-                trace_id=trace_id,
-                timestamp=timestamp,
-                vendor_id=vendor_id,
-                user_inquiry=inquiry,
-                disposition=TraceDisposition.ESCALATED,
-                model=model,
-                escalation_reason=escalation.reason,
-                duration_ms=(time.perf_counter() - started) * 1000.0,
-            )
-        )
-
-    # (2) Cross-vendor guard — references to another vendor's ecosystem are refused.
-    cross_vendor = detect_cross_vendor_reference(vendor_id, inquiry, repository.get_shipment_owner)
-    if cross_vendor.is_violation:
-        refusal = ImportClassification(
-            intent=InquiryIntent.CROSS_VENDOR_REFUSAL,
-            confidence=1.0,
-            reasoning=cross_vendor.reason or "Cross-vendor reference detected.",
-        )
-        return _persist(
-            AgentTrace(
-                trace_id=trace_id,
-                timestamp=timestamp,
-                vendor_id=vendor_id,
-                user_inquiry=inquiry,
-                classification=refusal,
-                draft_response=_CROSS_VENDOR_REFUSAL_DRAFT,
-                disposition=TraceDisposition.DRAFT,
-                model=model,
-                duration_ms=(time.perf_counter() - started) * 1000.0,
-            )
-        )
-
-    # (3) Resolve vendor scope — an unknown vendor is a hard reject (never reaches the model).
-    if repository.get_vendor(vendor_id) is None:
-        raise UnknownVendorError(vendor_id)
-
-    # (4) Build a fresh agent and (5) invoke it inside the ambient trace context.
-    agent = _build_agent(model)
-    result_messages: list[BaseMessage] = []
-    invoke_error: Exception | None = None
-    with trace_context(trace_id, vendor_id) as ctx:
-        try:
-            output = agent.invoke(
-                {"messages": [HumanMessage(content=inquiry)]},
-                config={"recursion_limit": _RECURSION_LIMIT},
-                context={"vendor_id": vendor_id},
-            )
-            result_messages = list(output.get("messages", []))
-        except Exception as exc:  # noqa: BLE001 - any loop failure degrades to a fallback draft
-            invoke_error = exc
-            _logger.exception("agent invocation failed for trace %s", trace_id)
-
-    tool_calls = tuple(ctx.tool_calls)
     classification = _extract_classification(tool_calls)
     draft_response = _extract_draft(tool_calls)
 
@@ -319,19 +378,83 @@ def run_agent(vendor_id: str, inquiry: str, model_id: str | None = None) -> Agen
         )
         draft_response = _FALLBACK_DRAFT
 
-    # (7) Persist exactly one audit trace and return the lean result.
-    return _persist(
-        AgentTrace(
-            trace_id=trace_id,
-            timestamp=timestamp,
-            vendor_id=vendor_id,
-            user_inquiry=inquiry,
-            classification=classification,
-            tool_calls=tool_calls,
-            draft_response=draft_response,
-            disposition=TraceDisposition.DRAFT,
-            model=model,
-            duration_ms=(time.perf_counter() - started) * 1000.0,
-            total_tokens=_sum_tokens(result_messages),
-        )
+    usage = _sum_tokens(result_messages)
+    return AgentTrace(
+        trace_id=meta.trace_id,
+        timestamp=meta.timestamp,
+        vendor_id=meta.vendor_id,
+        user_inquiry=meta.inquiry,
+        classification=classification,
+        tool_calls=tool_calls,
+        draft_response=draft_response,
+        disposition=TraceDisposition.DRAFT,
+        model=meta.model,
+        duration_ms=_elapsed_ms(meta),
+        prompt_tokens=usage.prompt_tokens if usage else None,
+        output_tokens=usage.output_tokens if usage else None,
+        thoughts_tokens=usage.thoughts_tokens if usage else None,
+        total_tokens=usage.total_tokens if usage else None,
     )
+
+
+def persist_result(trace: AgentTrace) -> AgentResult:
+    """Write the single audit document and project it to the lean API result."""
+    repository.put_trace(trace)
+    return AgentResult(
+        trace_id=trace.trace_id,
+        disposition=trace.disposition,
+        draft_response=trace.draft_response,
+        classification=trace.classification,
+        tool_call_count=len(trace.tool_calls),
+        tool_names=[call.tool_name for call in trace.tool_calls],
+        duration_ms=trace.duration_ms or 0.0,
+        model=trace.model,
+        escalation_reason=trace.escalation_reason,
+        prompt_tokens=trace.prompt_tokens,
+        output_tokens=trace.output_tokens,
+        thoughts_tokens=trace.thoughts_tokens,
+        total_tokens=trace.total_tokens,
+    )
+
+
+def run_agent(vendor_id: str, inquiry: str, model_id: str | None = None) -> AgentResult:
+    """Run the pipeline synchronously for one analyst inquiry and persist its audit trace.
+
+    ``vendor_id`` is the deterministically resolved scope (validated against the allowlist
+    and dropdown upstream); ``inquiry`` is the analyst's raw question. ``model_id`` overrides
+    the primary model - used by the Phase 4 Flash-vs-Pro eval. The async, SSE-emitting variant
+    is :func:`src.streaming.stream_agent_run`; both share the steps documented above.
+    """
+    meta = new_run(vendor_id, inquiry, model_id)
+
+    # (2) Deterministic pre-model guards - severe security / cross-vendor signals never reach
+    # the model, but are still audited as one trace.
+    guard = run_pre_model_guards(meta)
+    if guard is not None:
+        return persist_result(guard.trace)
+
+    # (3) Resolve vendor scope - an unknown vendor is a hard reject (the API maps it to 404).
+    if repository.get_vendor(vendor_id) is None:
+        raise UnknownVendorError(vendor_id)
+
+    # (4-5) Build a fresh agent and invoke it synchronously inside the ambient trace context.
+    # The whole run is synchronous, so the ContextVar is shared across the tool calls without
+    # any thread-hop bookkeeping.
+    agent = build_agent(meta.model)
+    result_messages: list[BaseMessage] = []
+    invoke_error: Exception | None = None
+    with trace_context(meta.trace_id, vendor_id) as ctx:
+        try:
+            output = agent.invoke(
+                {"messages": [HumanMessage(content=inquiry)]},
+                config={"recursion_limit": RECURSION_LIMIT},
+                context={"vendor_id": vendor_id},
+            )
+            result_messages = list(output.get("messages", []))
+        except Exception as exc:  # noqa: BLE001 - any loop failure degrades to a fallback draft
+            invoke_error = exc
+            _logger.exception("agent invocation failed for trace %s", meta.trace_id)
+
+    # (6-7) Assemble the single audit trace (with the no-draft fallback) and persist it.
+    trace = build_run_trace(meta, tuple(ctx.tool_calls), result_messages, invoke_error)
+    return persist_result(trace)

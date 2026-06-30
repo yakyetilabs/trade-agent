@@ -56,7 +56,7 @@ This definition also rules things out. A linear RAG pipeline that retrieves text
 
 - **In-session:** The current conversation context, discarded at session end.
 - **Per-vendor retrieval scope:** The resolved `vendor_id` constrains every tool call. There is no shared embedding store that mixes trade secrets across completely different vendor accounts.
-- **Procedural:** None in this MVP. Reusable response templates are deferred — see Section 9.
+- **Procedural:** None in this MVP. Reusable response templates are deferred — see Section 10.
 
 **Safety.** Safety is architected into the surrounding system, not the model. The model is never trusted to enforce a constraint that has a real cost when violated. Section 5 details the layers. The single most important commitment: the agent cannot transmit anything externally. Outbound clearance submission is always a human action.
 
@@ -178,7 +178,46 @@ _(See [`backend/src/embeddings.py`](https://github.com/yakyetilabs/trade-agent/b
 
 ---
 
-## 9. What This Is _Not_
+## 9. Frontend and Backend Wiring: One Origin via a Hosting Rewrite
+
+The frontend (React on Firebase Hosting) and the backend (FastAPI on Cloud Run) sit inside the same Firebase project, so how the browser reaches the API is itself a design choice rather than a default.
+The "buy the commodity, build the moat" posture (§3) extends to the wiring: it should ride the platform's native path, not hand-built glue.
+
+**The decision: serve the API through a Firebase Hosting rewrite, so the browser only ever sees one origin.**
+`firebase.json` routes `/api/**` to the Cloud Run service and falls back to the SPA's `index.html` for everything else, so Hosting proxies each API call from its own domain.
+That makes the call same-origin, and CORS stops being something the browser ever evaluates.
+
+```json
+"hosting": {
+  "rewrites": [
+    { "source": "/api/**", "run": { "serviceId": "trade-agent-backend", "region": "us-central1" } },
+    { "source": "**", "destination": "/index.html" }
+  ]
+}
+```
+
+Order is load-bearing: the `/api/**` rule is matched before the SPA catch-all, and static assets are served before either rewrite applies.
+Locally the Vite dev server's proxy mirrors the same `/api` route to the local backend, so the development and production topologies match and neither needs a cross-origin grant.
+The frontend therefore calls a relative `/api` path and never embeds a raw `*.run.app` URL.
+
+**The alternative I did not build: two origins joined by an explicit CORS allowlist.**
+The default Cloud Run shape hands the frontend the raw service URL and asks the backend to publish a CORS policy enumerating every permitted origin, with a preflight `OPTIONS` round-trip on each non-simple request.
+It works, but it stands up a second source of truth for "who may call this API" right beside the real one - the in-memory allowlist of §5 - and it is precisely the non-differentiating glue the platform already solves.
+Same-origin makes the question moot rather than merely answered.
+
+This is deliberately not a load balancer or IAP (cf. the IAP decision in §5): a Hosting rewrite carries no fixed hourly fee and does not put the public frontend behind a Google login wall.
+It is the free, native Hosting feature, `us-central1` is a first-class colocation region for it, and Cloud Run still scales to zero, so the idle footprint stays $0.
+This pattern is current and supported as of June 2026 - Firebase App Hosting is positioned for server-rendered frameworks (Next.js / Angular), not for a static SPA plus a separate containerized API, so the rewrite is the right tool rather than the legacy one.
+
+**One honest note on caching.**
+Routing through Hosting places a CDN in front of the API, which is harmless for the SPA's static assets and a hazard for its authenticated responses.
+Every vendor-scoped response must carry `Cache-Control: private, no-store` so the edge never caches one analyst's data and replays it to another; the same-origin win would otherwise smuggle a cross-tenant leak back in at the cache layer.
+That header is a response-layer requirement rather than an optional tuning knob, and it is the one new obligation this wiring choice creates.
+_(Planned, not yet built: the `firebase.json` rewrite and the response `Cache-Control` header are owned by the frontend and deploy phases. See [`docs/GCP_SETUP.md`](https://github.com/yakyetilabs/trade-agent/blob/main/docs/GCP_SETUP.md) §9.)_
+
+---
+
+## 10. What This Is _Not_
 
 To ensure the boundary between what is built and what is claimed remains completely transparent, this project explicitly is not:
 

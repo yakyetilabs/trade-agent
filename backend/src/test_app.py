@@ -9,7 +9,7 @@ The ``auth_client`` fixture defaults the analyst to *admin* scope (the predicate
 every vendor); scope-enforcement tests override the predicate to a narrow rule.
 """
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,6 +26,7 @@ from src.models import (
     Vendor,
 )
 from src.security import verify_authorized_analyst
+from src.streaming import DoneEvent, RunStartedEvent, StreamEvent
 
 _VENDOR = Vendor(
     vendor_id="V-001",
@@ -175,6 +176,53 @@ def test_inquiry_rejects_malformed_vendor_id(
 def test_inquiry_rejects_empty_inquiry(auth_client: TestClient) -> None:
     resp = auth_client.post("/api/inquiry", json={"vendor_id": "V-001", "inquiry": ""})
     assert resp.status_code == 422
+
+
+# --- POST /api/inquiry/stream ---------------------------------------------------
+def test_inquiry_stream_requires_auth() -> None:
+    client = TestClient(app)
+    resp = client.post("/api/inquiry/stream", json={"vendor_id": "V-001", "inquiry": "hi"})
+    assert resp.status_code in (401, 403)
+
+
+def test_inquiry_stream_out_of_scope_is_403(
+    auth_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The analyst is authorized for V-001 only; the 403 must land before the stream opens.
+    monkeypatch.setattr(app_module, "analyst_can_access_vendor", lambda _e, vid: vid == "V-001")
+
+    async def must_not_stream(*_args: object, **_kwargs: object) -> AsyncIterator[StreamEvent]:
+        raise AssertionError("stream_agent_run must not run for an out-of-scope vendor")
+        yield  # pragma: no cover - unreachable; only marks this an async generator
+
+    monkeypatch.setattr(app_module, "stream_agent_run", must_not_stream)
+
+    resp = auth_client.post("/api/inquiry/stream", json={"vendor_id": "V-002", "inquiry": "s?"})
+    assert resp.status_code == 403
+
+
+def test_inquiry_stream_emits_sse_events(
+    auth_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_stream(
+        vendor_id: str, inquiry: str, model_id: str | None = None
+    ) -> AsyncIterator[StreamEvent]:
+        yield RunStartedEvent(trace_id="tr-abc", vendor_id=vendor_id, model="gemini-2.5-flash")
+        yield DoneEvent(result=_RESULT)
+
+    monkeypatch.setattr(app_module, "stream_agent_run", fake_stream)
+
+    resp = auth_client.post(
+        "/api/inquiry/stream", json={"vendor_id": "V-001", "inquiry": "Why is S-1001 held?"}
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    assert resp.headers["cache-control"] == "no-store"
+    body = resp.text
+    assert "event: run_started" in body
+    assert "event: done" in body
+    assert "tr-abc" in body  # the AgentResult rode through in the done event's data payload
 
 
 # --- GET /api/vendors -----------------------------------------------------------

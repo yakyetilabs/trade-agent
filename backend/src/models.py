@@ -246,6 +246,13 @@ class AgentTrace(BaseModel):
     disposition: TraceDisposition
     model: str
     escalation_reason: str | None = None
-    # Aggregate token/latency metadata for the AgentOps surface.
+    # Aggregate token/latency metadata for the AgentOps surface. The token fields are
+    # the *billable* split: on Vertex thinking tokens bill at the OUTPUT rate, so
+    # ``output_tokens`` already includes ``thoughts_tokens`` and
+    # ``prompt_tokens + output_tokens == total_tokens`` (candidates alone would not
+    # reconcile against the total). All four are ``None`` on the no-model guard paths.
     duration_ms: float | None = None
+    prompt_tokens: int | None = None
+    output_tokens: int | None = None
+    thoughts_tokens: int | None = None
     total_tokens: int | None = None
