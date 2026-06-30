@@ -22,15 +22,12 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
 
 from src import repository
-from src.data.generators import build_hts_clauses
+from src.data.hts_catalog import get_hts_clause
 from src.models import Shipment
 from src.tools.vendor_context import VendorContext
 from src.tracing.trace_context import record_tool_call
 
 _logger = logging.getLogger(__name__)
-
-# Built once at import: HTS code -> clause, for deterministic line enrichment.
-_HTS_INDEX = {clause.hts_code: clause for clause in build_hts_clauses()}
 
 _StatusFilter = Literal["in_transit", "held", "flagged", "cleared"]
 
@@ -41,7 +38,7 @@ def _enrich(shipment: Shipment) -> dict[str, object]:
     enriched_lines: list[dict[str, object]] = []
     for line in shipment.manifest:
         line_data: dict[str, object] = line.model_dump(mode="json")
-        clause = _HTS_INDEX.get(line.hts_code)
+        clause = get_hts_clause(line.hts_code)
         if clause is not None:
             line_data["restriction"] = clause.restriction.value
             line_data["duty_rate"] = clause.duty_rate
