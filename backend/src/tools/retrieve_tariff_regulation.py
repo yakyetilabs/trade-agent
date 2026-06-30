@@ -16,14 +16,8 @@ from langchain_core.documents import Document
 from langchain_core.tools import tool
 from langchain_pinecone import PineconeVectorStore
 
-from src.config import (
-    GCP_PROJECT,
-    GCP_REGION,
-    PINECONE_API_KEY,
-    PINECONE_INDEX,
-    VERTEX_EMBEDDING_DIM,
-    VERTEX_EMBEDDING_MODEL,
-)
+from src.config import PINECONE_API_KEY, PINECONE_INDEX
+from src.embeddings import VertexEmbeddings
 from src.tracing.trace_context import record_tool_call
 
 _DEFAULT_K = 5
@@ -32,18 +26,10 @@ _DEFAULT_K = 5
 @lru_cache(maxsize=1)
 def _vector_store() -> PineconeVectorStore:
     """Construct the Pinecone-backed vector store once (Vertex embeds, Pinecone stores)."""
-    from langchain_google_vertexai import VertexAIEmbeddings
-
-    embeddings = VertexAIEmbeddings(
-        model=VERTEX_EMBEDDING_MODEL,
-        project=GCP_PROJECT,
-        location=GCP_REGION,
-        dimensions=VERTEX_EMBEDDING_DIM,
-    )
     return PineconeVectorStore(
         index_name=PINECONE_INDEX,
         pinecone_api_key=PINECONE_API_KEY,
-        embedding=embeddings,
+        embedding=VertexEmbeddings(),
     )
 
 

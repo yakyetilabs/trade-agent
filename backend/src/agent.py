@@ -34,9 +34,9 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from langchain_core.messages import BaseMessage, HumanMessage
-from langchain_google_vertexai import ChatVertexAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.prebuilt import create_react_agent
+from langgraph.prebuilt import create_react_agent  # pyright: ignore[reportDeprecated]
 from pydantic import BaseModel, ConfigDict
 
 from src import repository
@@ -155,13 +155,17 @@ def _build_agent(model_id: str) -> CompiledStateGraph[Any, VendorContext, Any, A
     schema we actually bound. Isolated so tests can substitute a fake agent without a
     model or credentials.
     """
-    model = ChatVertexAI(
+    model = ChatGoogleGenerativeAI(
         model=model_id,
+        vertexai=True,
         project=GCP_PROJECT,
         location=GCP_REGION,
         temperature=0.0,
     )
-    agent = create_react_agent(
+    # create_react_agent is deprecated in favor of langchain.agents.create_agent; that
+    # migration pulls in the langchain package and must preserve the context_schema vendor
+    # binding, so it is tracked as a separate follow-up and suppressed locally here.
+    agent = create_react_agent(  # pyright: ignore[reportDeprecated]
         model=model,
         tools=[
             classify_import_restriction,

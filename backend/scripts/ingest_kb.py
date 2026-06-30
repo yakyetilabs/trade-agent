@@ -2,9 +2,9 @@
 
 The knowledge base is shared, public-style HTS reference text — it is deliberately
 *not* vendor-partitioned. Each clause is embedded with Vertex AI
-``gemini-embedding-001`` at 768 dimensions (the `dimensions=` field on the
-LangChain wrapper maps to the model's ``output_dimensionality``) and upserted into
-the Pinecone index keyed by HTS code, so a re-ingest overwrites rather than
+``gemini-embedding-001`` at 768 dimensions (via the shared ``VertexEmbeddings``
+adapter, which pins ``output_dimensionality`` explicitly) and upserted into the
+Pinecone index keyed by HTS code, so a re-ingest overwrites rather than
 duplicates. ``retrieve_tariff_regulation`` (Phase 3) queries this same store.
 
 Usage (from ``backend/``):
@@ -21,8 +21,6 @@ import argparse
 from langchain_core.documents import Document
 
 from src.config import (
-    GCP_PROJECT,
-    GCP_REGION,
     PINECONE_API_KEY,
     PINECONE_INDEX,
     VERTEX_EMBEDDING_DIM,
@@ -50,18 +48,14 @@ def _build_documents() -> tuple[list[Document], list[str]]:
 def _ingest(documents: list[Document], ids: list[str]) -> None:
     """Embed at 768-dim and upsert into the Pinecone index (overwrite by id)."""
     # Imported lazily so --dry-run needs no credentials or heavy SDK import.
-    from langchain_google_vertexai import VertexAIEmbeddings
     from langchain_pinecone import PineconeVectorStore
 
-    if not PINECONE_API_KEY:
-        raise SystemExit("PINECONE_API_KEY is not set — populate backend/.env first.")
+    from src.embeddings import VertexEmbeddings
 
-    embeddings = VertexAIEmbeddings(
-        model=VERTEX_EMBEDDING_MODEL,  # pydantic alias for the model_name field
-        project=GCP_PROJECT,
-        location=GCP_REGION,
-        dimensions=VERTEX_EMBEDDING_DIM,
-    )
+    if not PINECONE_API_KEY:
+        raise SystemExit("PINECONE_API_KEY is not set - populate backend/.env first.")
+
+    embeddings = VertexEmbeddings()
 
     # Fail fast if the embedder's output width doesn't match the fixed index
     # dimension — Pinecone would otherwise reject the upsert with an opaque error.

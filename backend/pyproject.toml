@@ -8,11 +8,11 @@ dependencies = [
     "pydantic>=2.7",
     "firebase-admin>=6.5",
     "google-cloud-firestore>=2.16",
-    # Knowledge-base phase: Vertex embeddings (the embedder) + Pinecone (the dumb
-    # vector bucket), both via their LangChain wrappers. langchain-google-vertexai
-    # pulls in google-cloud-aiplatform (the raw `vertexai` SDK fallback for 768-dim
-    # embeddings); langchain-pinecone pulls in the Pinecone client.
-    "langchain-google-vertexai>=2.0",
+    # Model + KB layer: chat via langchain-google-genai (ChatGoogleGenerativeAI on Vertex,
+    # vertexai=True); embeddings via the raw google-genai embed_content call (explicit
+    # 768-dim); stored and queried through the Pinecone vector store.
+    "langchain-google-genai>=4.2.6",
+    "google-genai>=2.10.0",
     "langchain-pinecone>=0.2",
     # Agent phase (Phase 3): LangGraph state machine + ToolRuntime vendor scoping.
     "langgraph>=0.6",
@@ -61,3 +61,9 @@ extend-immutable-calls = [
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 reportMissingTypeStubs = false
+# API-currency gate: flag any use of a deprecated library API as an error, so drift
+# like the langchain-google-vertexai deprecation is caught in the shared config (the
+# editor's basedpyright reads this same section) rather than by luck.
+reportDeprecated = "error"
+venvPath= "."
+venv = ".venv"
