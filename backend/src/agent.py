@@ -10,7 +10,7 @@ and only after the two pre-model guards have cleared the inquiry:
    deterministic draft. The model never runs.
 3. **Vendor resolution** — an unknown ``vendor_id`` raises :class:`UnknownVendorError`
    (the API maps it to 404). This is the only step that can reject a well-formed run.
-4. **Build** a fresh ReAct agent (Gemini Flash, ``temperature=0``) bound to the
+4. **Build** a fresh tool-calling agent (Gemini Flash, ``temperature=0``) bound to the
    :class:`~src.tools.vendor_context.VendorContext` schema. A new chat model is built
    per run — chat models carry per-invocation tool bindings and must not be memoized;
    the Vertex SDK init is the singleton.
@@ -31,12 +31,12 @@ import logging
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
+from langchain.agents import create_agent
 from langchain_core.messages import BaseMessage, HumanMessage
-from langchain_google_vertexai import ChatVertexAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, ConfigDict
 
 from src import repository
@@ -59,7 +59,7 @@ from src.tracing.trace_context import trace_context
 
 _logger = logging.getLogger(__name__)
 
-# Supersteps, not model calls: a ReAct round is agent->tools = 2 supersteps, so the
+# Supersteps, not model calls: a tool-calling round is model->tools = 2 supersteps, so the
 # normal flow (classify -> lookup -> retrieve -> draft = 4 rounds) is ~9 supersteps.
 # 14 leaves headroom for ~2 extra rounds (e.g. a re-retrieve) before the loop is
 # capped and the step-6 fallback fires.
@@ -79,7 +79,7 @@ _CROSS_VENDOR_REFUSAL_DRAFT = (
 )
 
 _SYSTEM_PROMPT = """\
-You are an international trade-compliance assistant for a single authorized vendor. \
+You are a US trade-compliance assistant for a single authorized vendor. \
 You help an analyst understand why imports are held or flagged and draft an official clearance \
 response for that analyst — a human — to review and send. You never send anything yourself.
 
@@ -146,22 +146,23 @@ class AgentResult(BaseModel):
 
 
 def _build_agent(model_id: str) -> CompiledStateGraph[Any, VendorContext, Any, Any]:
-    """Construct a fresh ReAct agent bound to the vendor-context schema.
+    """Construct a fresh tool-calling agent bound to the vendor-context schema.
 
-    The context type-param is pinned to :class:`VendorContext` so the ``context=``
-    kwarg at the invoke site type-checks; the state/input/output params are langgraph
-    internals we treat opaquely. ``create_react_agent`` does not thread ``context_schema``
-    into its declared return type (it defaults the param to ``None``), so we cast to the
-    schema we actually bound. Isolated so tests can substitute a fake agent without a
-    model or credentials.
+    Built with :func:`langchain.agents.create_agent` (the LangChain 1.0 successor to the
+    deprecated ``langgraph.prebuilt.create_react_agent``). The context type-param is pinned
+    to :class:`VendorContext` - ``create_agent`` threads it into the compiled graph's return
+    type, so the ``context=`` kwarg at the invoke site type-checks with no cast; the
+    state/input/output params are langgraph internals we treat opaquely. Isolated so tests
+    can substitute a fake agent (or a fake chat model) without a model or credentials.
     """
-    model = ChatVertexAI(
+    model = ChatGoogleGenerativeAI(
         model=model_id,
+        vertexai=True,
         project=GCP_PROJECT,
         location=GCP_REGION,
         temperature=0.0,
     )
-    agent = create_react_agent(
+    return create_agent(
         model=model,
         tools=[
             classify_import_restriction,
@@ -169,11 +170,9 @@ def _build_agent(model_id: str) -> CompiledStateGraph[Any, VendorContext, Any, A
             retrieve_tariff_regulation,
             draft_clearance_response,
         ],
-        prompt=_SYSTEM_PROMPT,
+        system_prompt=_SYSTEM_PROMPT,
         context_schema=VendorContext,
-        version="v2",
     )
-    return cast("CompiledStateGraph[Any, VendorContext, Any, Any]", agent)
 
 
 def _extract_classification(tool_calls: tuple[ToolCallLog, ...]) -> ImportClassification | None:

@@ -18,14 +18,14 @@ from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import tool
-from langchain_google_vertexai import ChatVertexAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
 from src.config import GCP_PROJECT, GCP_REGION, VERTEX_PRIMARY_MODEL
 from src.models import ImportClassification, InquiryIntent, RestrictionLevel
 from src.tracing.trace_context import record_tool_call
 
-_SYSTEM_PROMPT = """You are an inquiry classifier for an international trade-compliance assistant.
+_SYSTEM_PROMPT = """You are an inquiry classifier for a US trade-compliance assistant.
 
 Classify the analyst's inquiry into exactly one intent:
 - "tariff_lookup": HTS classification, duty/tariff rates, or whether goods are restricted.
@@ -59,8 +59,9 @@ class _ClassifierOutput(BaseModel):
 
 def _classify_once(inquiry: str, model_id: str | None) -> _ClassifierOutput:
     """Single structured Vertex call — the test seam for this tool."""
-    chat = ChatVertexAI(
+    chat = ChatGoogleGenerativeAI(
         model=model_id or VERTEX_PRIMARY_MODEL,
+        vertexai=True,
         project=GCP_PROJECT,
         location=GCP_REGION,
         temperature=0.0,

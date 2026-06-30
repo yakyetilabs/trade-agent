@@ -11,7 +11,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import pytest
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.prebuilt import ToolNode
 
 from src import agent, repository
 from src.models import (
@@ -23,6 +26,7 @@ from src.models import (
     TraceDisposition,
     Vendor,
 )
+from src.tools.vendor_context import VendorContext
 from src.tracing.trace_context import record_tool_call
 
 _VENDOR = Vendor(
@@ -291,3 +295,34 @@ def test_invoke_failure_degrades_to_fallback_draft(monkeypatch: pytest.MonkeyPat
     assert "RuntimeError" in result.classification.reasoning
     assert result.tool_call_count == 0
     assert len(captured) == 1  # a failed run still produces exactly one audit trace
+
+
+# --- Build-time wiring (security-critical: vendor context + the four tools) ------
+def test_build_agent_binds_vendor_context_and_the_four_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real create_agent graph carries the vendor context schema and the four tools.
+
+    Unlike the orchestrator tests above (which replace ``_build_agent`` wholesale), this
+    builds the ACTUAL agent graph; only the chat model is swapped for a credential-free
+    fake, so no Vertex SDK init or network call happens. It is the security-critical
+    wiring check the faked tests cannot make: vendor scope must ride in the runtime
+    ``context_schema``, never as a model-facing tool argument the LLM could set or override.
+    """
+    fake_model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
+    monkeypatch.setattr(agent, "ChatGoogleGenerativeAI", lambda **_kwargs: fake_model)
+
+    compiled = agent._build_agent("gemini-2.5-flash")
+
+    assert isinstance(compiled, CompiledStateGraph)
+    # Vendor scope is bound as runtime context: the load-bearing isolation guarantee.
+    assert compiled.context_schema is VendorContext
+    # Exactly the four trade tools are wired into the loop, no more and no fewer.
+    tools_node = compiled.nodes["tools"].bound
+    assert isinstance(tools_node, ToolNode)
+    assert set(tools_node.tools_by_name) == {
+        "classify_import_restriction",
+        "lookup_shipment_manifest",
+        "retrieve_tariff_regulation",
+        "draft_clearance_response",
+    }

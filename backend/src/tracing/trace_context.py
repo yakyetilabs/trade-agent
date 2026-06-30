@@ -18,7 +18,7 @@ the agent is invoked, so appends made deep inside the run share the same
 import contextvars
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -43,7 +43,7 @@ _current_trace: contextvars.ContextVar[TraceContext | None] = contextvars.Contex
 
 
 @contextmanager
-def trace_context(trace_id: str, vendor_id: str) -> Iterator[TraceContext]:
+def trace_context(trace_id: str, vendor_id: str) -> Generator[TraceContext]:
     """Bind a fresh :class:`TraceContext` for the duration of the ``with`` block."""
     ctx = TraceContext(trace_id=trace_id, vendor_id=vendor_id)
     token = _current_trace.set(ctx)
@@ -73,7 +73,7 @@ def get_current_trace() -> TraceContext | None:
 
 
 @contextmanager
-def record_tool_call(tool_name: str, tool_input: dict[str, object]) -> Iterator[dict[str, object]]:
+def record_tool_call(tool_name: str, tool_input: dict[str, object]) -> Generator[dict[str, object]]:
     """Time a tool invocation and append a :class:`ToolCallLog` on block exit.
 
     Yields a mutable ``output`` dict the caller fills with a summary of what the
