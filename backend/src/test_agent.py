@@ -229,7 +229,12 @@ def test_normal_run_extracts_classification_draft_and_tokens(
     assert result.draft_response is not None
     assert result.draft_response.startswith("Shipment S-1001 is held")
     assert result.tool_call_count == 4
-    assert result.total_tokens == 140  # token aggregate surfaced on the result (cost axis)
+    # Billable token split surfaced on the result (cost axis). No reasoning detail on
+    # this message, so thoughts is 0; prompt + output == total.
+    assert result.prompt_tokens == 100
+    assert result.output_tokens == 40
+    assert result.thoughts_tokens == 0
+    assert result.total_tokens == 140
     assert result.tool_names == [
         "classify_import_restriction",
         "lookup_shipment_manifest",
@@ -240,11 +245,64 @@ def test_normal_run_extracts_classification_draft_and_tokens(
     assert fake.invoked_with is not None
     assert fake.invoked_with["context"] == {"vendor_id": "V-001"}
     assert fake.invoked_with["config"] == {"recursion_limit": agent._RECURSION_LIMIT}
-    # Exactly one trace persisted, carrying the embedded tool calls and token aggregate.
+    # Exactly one trace persisted, carrying the embedded tool calls and token split.
     assert len(captured) == 1
     assert len(captured[0].tool_calls) == 4
+    assert captured[0].prompt_tokens == 100
+    assert captured[0].output_tokens == 40
+    assert captured[0].thoughts_tokens == 0
     assert captured[0].total_tokens == 140
     assert captured[0].duration_ms is not None
+
+
+def test_token_split_folds_thoughts_and_sums_across_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Thinking tokens are kept as a sub-split of output, summed over all AI messages.
+
+    On Vertex thinking bills at the OUTPUT rate, so output_tokens already includes the
+    reasoning tokens (output_token_details.reasoning) and prompt + output == total. Two
+    AI messages (a tool-call turn then the final turn) exercise the per-field summing.
+    """
+    _vendor_exists(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    captured = _capture_traces(monkeypatch)
+
+    fake = _FakeAgent(
+        calls=[_classify_spec(), _draft_spec("Grounded draft citing HTS 8517.13.0000.")],
+        messages=[
+            AIMessage(
+                content="",
+                usage_metadata={
+                    "input_tokens": 200,
+                    "output_tokens": 90,  # 60 visible + 30 thinking
+                    "total_tokens": 290,
+                    "output_token_details": {"reasoning": 30},
+                },
+            ),
+            AIMessage(
+                content="done",
+                usage_metadata={
+                    "input_tokens": 50,
+                    "output_tokens": 20,  # 15 visible + 5 thinking
+                    "total_tokens": 70,
+                    "output_token_details": {"reasoning": 5},
+                },
+            ),
+        ],
+    )
+    _install_agent(monkeypatch, fake)
+
+    result = agent.run_agent("V-001", "What duty applies to my declared electronics?")
+
+    assert result.prompt_tokens == 250
+    assert result.output_tokens == 110  # 90 + 20, thoughts already folded in
+    assert result.thoughts_tokens == 35  # 30 + 5
+    assert result.total_tokens == 360  # 290 + 70 == prompt + output
+    assert result.prompt_tokens + result.output_tokens == result.total_tokens
+    assert len(captured) == 1
+    assert captured[0].thoughts_tokens == 35
+    assert captured[0].output_tokens == 110
 
 
 # --- (6) No-draft fallback ------------------------------------------------------

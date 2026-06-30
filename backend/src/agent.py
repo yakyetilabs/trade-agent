@@ -31,7 +31,7 @@ import logging
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 from langchain.agents import create_agent
 from langchain_core.messages import BaseMessage, HumanMessage
@@ -142,6 +142,11 @@ class AgentResult(BaseModel):
     duration_ms: float
     model: str
     escalation_reason: str | None = None
+    # Billable token split (see _TokenUsage / AgentTrace): output_tokens includes
+    # thoughts_tokens and prompt + output == total.
+    prompt_tokens: int | None = None
+    output_tokens: int | None = None
+    thoughts_tokens: int | None = None
     total_tokens: int | None = None
 
 
@@ -202,16 +207,42 @@ def _extract_draft(tool_calls: tuple[ToolCallLog, ...]) -> str | None:
     return draft
 
 
-def _sum_tokens(messages: list[BaseMessage]) -> int | None:
-    """Best-effort total-token aggregate across the run's AI messages."""
-    total = 0
+class _TokenUsage(NamedTuple):
+    """The run's billable token split, summed across its AI messages.
+
+    Sourced from each message's standardized ``usage_metadata`` (langchain-core), which
+    ``langchain-google-genai`` fills from the native Vertex counts: ``input_tokens`` <-
+    ``prompt_token_count`` and ``output_tokens`` <- ``candidates_token_count +
+    thoughts_token_count``. On Vertex thinking bills at the OUTPUT rate, so
+    ``output_tokens`` already folds in ``thoughts_tokens`` and ``prompt + output ==
+    total``. The native counts are NOT exposed on ``response_metadata`` for this
+    non-streaming invoke path, so ``usage_metadata`` is the source of record.
+    """
+
+    prompt_tokens: int
+    output_tokens: int
+    thoughts_tokens: int
+    total_tokens: int
+
+
+def _sum_tokens(messages: list[BaseMessage]) -> _TokenUsage | None:
+    """Aggregate the billable token split across the run's AI messages.
+
+    ``None`` when no message carried usage (e.g. a faked or usage-less run), which keeps
+    the trace's token fields ``None`` rather than a misleading all-zero split.
+    """
+    prompt = output = thoughts = total = 0
     found = False
     for message in messages:
         usage = getattr(message, "usage_metadata", None)
-        if usage:
-            total += int(usage.get("total_tokens", 0))
-            found = True
-    return total if found else None
+        if not usage:
+            continue
+        found = True
+        prompt += int(usage.get("input_tokens", 0))
+        output += int(usage.get("output_tokens", 0))
+        total += int(usage.get("total_tokens", 0))
+        thoughts += int((usage.get("output_token_details") or {}).get("reasoning", 0))
+    return _TokenUsage(prompt, output, thoughts, total) if found else None
 
 
 def _persist(trace: AgentTrace) -> AgentResult:
@@ -227,6 +258,9 @@ def _persist(trace: AgentTrace) -> AgentResult:
         duration_ms=trace.duration_ms or 0.0,
         model=trace.model,
         escalation_reason=trace.escalation_reason,
+        prompt_tokens=trace.prompt_tokens,
+        output_tokens=trace.output_tokens,
+        thoughts_tokens=trace.thoughts_tokens,
         total_tokens=trace.total_tokens,
     )
 
@@ -320,6 +354,7 @@ def run_agent(vendor_id: str, inquiry: str, model_id: str | None = None) -> Agen
         draft_response = _FALLBACK_DRAFT
 
     # (7) Persist exactly one audit trace and return the lean result.
+    usage = _sum_tokens(result_messages)
     return _persist(
         AgentTrace(
             trace_id=trace_id,
@@ -332,6 +367,9 @@ def run_agent(vendor_id: str, inquiry: str, model_id: str | None = None) -> Agen
             disposition=TraceDisposition.DRAFT,
             model=model,
             duration_ms=(time.perf_counter() - started) * 1000.0,
-            total_tokens=_sum_tokens(result_messages),
+            prompt_tokens=usage.prompt_tokens if usage else None,
+            output_tokens=usage.output_tokens if usage else None,
+            thoughts_tokens=usage.thoughts_tokens if usage else None,
+            total_tokens=usage.total_tokens if usage else None,
         )
     )
