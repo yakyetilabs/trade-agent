@@ -25,7 +25,7 @@ from src.config import GCP_PROJECT, GCP_REGION, VERTEX_PRIMARY_MODEL
 from src.models import ImportClassification, InquiryIntent, RestrictionLevel
 from src.tracing.trace_context import record_tool_call
 
-_SYSTEM_PROMPT = """You are an inquiry classifier for an international trade-compliance assistant.
+_SYSTEM_PROMPT = """You are an inquiry classifier for a US trade-compliance assistant.
 
 Classify the analyst's inquiry into exactly one intent:
 - "tariff_lookup": HTS classification, duty/tariff rates, or whether goods are restricted.

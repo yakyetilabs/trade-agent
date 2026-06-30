@@ -79,7 +79,7 @@ _CROSS_VENDOR_REFUSAL_DRAFT = (
 )
 
 _SYSTEM_PROMPT = """\
-You are an international trade-compliance assistant for a single authorized vendor. \
+You are a US trade-compliance assistant for a single authorized vendor. \
 You help an analyst understand why imports are held or flagged and draft an official clearance \
 response for that analyst — a human — to review and send. You never send anything yourself.
 
