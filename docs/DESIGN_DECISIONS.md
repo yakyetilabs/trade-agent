@@ -5,6 +5,29 @@ This document maps that framework's questions to the engineering choices in this
 
 The point of this page is to make one thing visible: this project is not a generic framework demo with an arbitrary backend. It is a specific set of architectural commitments made under a specific governance philosophy. The same skeleton would re-skin to almost any regulated-industry agentic workflow where data boundaries and audit trails are non-negotiable.
 
+### The transferable spine
+
+That last claim should be auditable, not rhetorical, so here it is made concrete.
+The rows below are the operating model of a regulated-enterprise compliance or claims desk, each mapped to the file where it lives in this repo, then re-skinned to claims adjudication.
+The nouns change; the spine does not.
+
+| Spine element | This build (US trade compliance) | Claims adjudication |
+| --- | --- | --- |
+| Authorized user | Trade compliance analyst | Claims adjuster / examiner |
+| Entitlement scope | Authorized vendor set, resolved server-side (`security.py`, `ANALYST_VENDOR_SCOPES`) | Assigned claimants / book of business |
+| Work item (a case) | Held or flagged shipment | Pended or flagged claim |
+| Scoped evidence | The vendor's shipment manifests (`lookup_shipment_manifest`) | Claim line items and coverage |
+| Governing rule | HTSUS clause from the KB (`retrieve_tariff_regulation`) | Policy provision / coverage clause |
+| Deterministic pre-screen | Escalation + cross-vendor guards (`safeguards/`) | Fraud / SIU referral + claimant segregation |
+| Maker (prepares) | Agent drafts the clearance response (`draft_clearance_response`) | Agent drafts the determination |
+| Checker (approves; same human) | Analyst reviews and releases | Examiner reviews and issues |
+| Immutable audit | One `AgentTrace` per case | Claim decision log / file |
+| Autonomy posture | Supervised, gated path to delegated (§7) | Supervised |
+
+The code is deliberately specific to trade compliance.
+The transferable asset is the design philosophy the rows share: deterministic boundaries resolved outside the model, maker-checker with the agent as the maker, evidence-grounded output, an immutable per-case audit record, and a supervised autonomy posture with an evidence-gated path to more.
+The trade skin is proof the philosophy was built, not merely described.
+
 ---
 
 ## 1. The Agent Definition I'm Working From
@@ -61,7 +84,7 @@ For this workflow, the three decision types and their thresholds:
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | **Inquiry classification & routing**   | Classifier confidence is $\ge 0.85$ _and_ inquiry type is in the supported set (tariff lookup, manifest flag resolution, clearance requirements) | Confidence is between $0.60$ and $0.84$                                               | Confidence is $< 0.60$, _or_ inquiry involves an existing legal dispute, severe tariff fraud flags, or contraband language |
 | **Drafted clearance response content** | Response cleanly cites a retrieved HTS policy chunk by ID _and_ contains no corporate liability commitments                                      | Response includes inferred international trade assertions or delivery time guarantees | Response involves raw regulatory fine determinations, or formal legal customs appeals decisions                            |
-| **Outbound delivery**                  | **Never.**                                                                                                                                       | N/A                                                                                   | Always. A human international trade compliance analyst reviews and sends every single response in the MVP.                 |
+| **Outbound delivery**                  | **Never.**                                                                                                                                       | N/A                                                                                   | Always. A human US trade compliance analyst reviews and sends every single response in the MVP.                 |
 
 The third row is the architectural commitment that matters most. The agent's autonomy on outbound delivery is zero, by design. This is a hard-coded constraint that completely bypasses model discretion.
 
@@ -113,7 +136,7 @@ The promotion path to **Delegated** — where the agent can automatically releas
 To ensure the boundary between what is built and what is claimed remains completely transparent, this project explicitly is not:
 
 - **Connected to real trade or custom systems.** Every single bill of lading, container status, vendor name, and manifest discrepancy is synthetic and generated by our local scripts. No real trade secrets or corporate secrets exist anywhere.
-- **Affiliated with any actual port authority or carrier.** The architecture mirrors the exact shape of an international supply chain workflow, but no real-world agencies or personnel are attached.
+- **Affiliated with any actual port authority or carrier.** The architecture mirrors the exact shape of a US import customs-clearance workflow, but no real-world agencies or personnel are attached.
 - **Built with bloated third-party AgentOps platforms.** No Langfuse or external observability proxies. Cloud Run streaming logs, a dedicated Firestore trace collection, and a custom `/traces` analytics page in the web interface comprise the entire lightweight operational surface.
 - **Equipped with a deterministic post-processing policy engine.** The system relies on rigid system-prompt enforcement for text assertions, which is the exact model-trusted constraint a production pipeline would fortify with an independent rules parser.
 - **Equipped with full least-privilege IAM policies.** The `trade-agent-platform-access` service role includes minor logging read privileges for rapid operator debugging that the serverless engine itself does not consume during runtime transactions.
