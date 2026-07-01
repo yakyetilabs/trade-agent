@@ -1,0 +1,27 @@
+# Paths are relative to the build context root (backend/). Keep the context and image small,
+# and NEVER ship secrets or the local venv.
+
+# Secrets and local env files - MUST NOT enter the image. In production the Pinecone key is
+# injected by Cloud Run from Secret Manager, not baked in.
+.env
+.env.*
+
+# Local virtualenv - rebuilt inside the image by `uv sync`.
+.venv/
+
+# Python caches and build artifacts.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Co-located unit tests are not needed to serve requests.
+**/test_*.py
+
+# Eval reports (git-ignored) and any locally generated results.
+eval/results/
+
+# OS / editor cruft.
+.DS_Store
