@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { formatConfidence, formatLatency, formatTokens, humanizeIntent } from "./format";
+import {
+  formatConfidence,
+  formatLatency,
+  formatTimestamp,
+  formatTokens,
+  humanizeIntent,
+} from "./format";
 
 describe("humanizeIntent", () => {
   it("title-cases and de-underscores an intent", () => {
@@ -36,5 +42,18 @@ describe("formatTokens", () => {
     expect(formatTokens(12282)).toBe("12,282");
     expect(formatTokens(null)).toBe("-");
     expect(formatTokens(0)).toBe("0");
+  });
+});
+
+describe("formatTimestamp", () => {
+  it("renders a compact date-time in the given time zone", () => {
+    const result = formatTimestamp("2026-07-01T14:30:00Z", { timeZone: "UTC" });
+    expect(result).toMatch(/^Jul 1, 2026,/);
+    expect(result).toContain("2:30");
+  });
+  it("renders - for absent or unparseable input", () => {
+    expect(formatTimestamp(null)).toBe("-");
+    expect(formatTimestamp(undefined)).toBe("-");
+    expect(formatTimestamp("not-a-date")).toBe("-");
   });
 });

@@ -29,3 +29,25 @@ export function formatTokens(count: number | null | undefined): string {
   if (count === null || count === undefined) return "-";
   return count.toLocaleString("en-US");
 }
+
+/**
+ * An ISO-8601 timestamp as a compact date-time ("Jul 1, 2026, 2:30 PM"); "-" when absent or
+ * unparseable. `locale`/`timeZone` are injectable so the projection is unit-testable deterministically;
+ * display defaults to en-US in the host time zone, matching this US-compliance tool.
+ */
+export function formatTimestamp(
+  iso: string | null | undefined,
+  opts?: { locale?: string; timeZone?: string },
+): string {
+  if (!iso) return "-";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString(opts?.locale ?? "en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    ...(opts?.timeZone ? { timeZone: opts.timeZone } : {}),
+  });
+}

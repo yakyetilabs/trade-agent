@@ -1,31 +1,11 @@
 import { useState } from "react";
 
 import type { AgentResult, TraceDisposition } from "../types/api";
-import { tokenizeCitations } from "./citations";
+import { CitedDraft } from "./CitedDraft";
 import { DispositionActions } from "./DispositionActions";
 import { DispositionBadge } from "./DispositionBadge";
 import type { GuardOutcome } from "./useInquiryRun";
 import { RunMetaStrip } from "./RunMetaStrip";
-
-/** Render draft text with cited HTS codes and shipment ids highlighted as monospace chips. */
-function CitedDraft({ text }: { text: string }) {
-  return (
-    <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg">
-      {tokenizeCitations(text).map((token, index) =>
-        token.kind === "text" ? (
-          <span key={index}>{token.value}</span>
-        ) : (
-          <span
-            key={index}
-            className="mx-0.5 inline-block rounded bg-elevated px-1.5 py-0.5 font-mono text-[0.85em] text-accent"
-          >
-            {token.value}
-          </span>
-        ),
-      )}
-    </p>
-  );
-}
 
 /**
  * The terminal panel for a finished run. A grounded draft settles into a document card with cited
@@ -66,7 +46,7 @@ export function DraftPanel({ result, guard }: { result: AgentResult; guard: Guar
             : "The run finished without generating a draft."}
         </p>
         <div className="mt-4">
-          <RunMetaStrip result={result} />
+          <RunMetaStrip metrics={result} />
         </div>
       </div>
     );
@@ -115,7 +95,7 @@ export function DraftPanel({ result, guard }: { result: AgentResult; guard: Guar
       </div>
 
       <div className="mt-4">
-        <RunMetaStrip result={result} />
+        <RunMetaStrip metrics={result} />
       </div>
     </div>
   );
