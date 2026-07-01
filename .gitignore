@@ -12,7 +12,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 .venv/
-.uv/                   # uv package manager cache directory
+# uv package manager cache directory
+.uv/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
@@ -21,11 +22,15 @@ htmlcov/
 
 dist/
 node_modules/
-/frontend/dist/        # Vite production build output
+# Vite production build output
+/frontend/dist/
 .eslintcache
 *.tsbuildinfo
+# Firebase CLI local deploy cache (hosting file-hash manifest)
+.firebase/
 # Project-Specific Evaluation Artifacts
-/backend/eval/results/   # Keeps heavy evaluation run json reports out of git history
+# Keeps heavy evaluation run json reports out of git history
+/backend/eval/results/
 
 .env
 .env.local

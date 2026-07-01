@@ -71,6 +71,7 @@ gcloud services enable \
   cloudbuild.googleapis.com \
   iamcredentials.googleapis.com \
   identitytoolkit.googleapis.com \
+  secretmanager.googleapis.com \
   --project=trade-agent-ff12a
 ```
 
@@ -80,6 +81,7 @@ gcloud services enable \
 - `artifactregistry` — container image storage (Container Registry / `gcr.io` is retired; use Artifact Registry)
 - `cloudbuild` — image build during `gcloud run deploy --source`
 - `identitytoolkit` — Firebase Authentication backend
+- `secretmanager` — the Pinecone API key at runtime, mounted into Cloud Run via `--set-secrets` (see §9)
 
 ---
 
@@ -278,8 +280,11 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 
 ### Backend → Cloud Run
 
-The `backend/deploy.sh` script (built in a later phase) will run a single deploy. Key flags that preserve
-the architecture:
+The `backend/deploy.sh` script runs a single deploy.
+The image builds from `backend/Dockerfile`, not Cloud Run buildpacks: the Python buildpack doesn't install `uv` (our resolver) and its runtime registry doesn't carry every exact CPython patch, whereas a Dockerfile gives uv's lockfile-pinned installs, an exact interpreter, and a reviewable build.
+`gcloud run deploy --source=backend` auto-prefers the Dockerfile when one is present (verified against the Cloud Run source-deploy docs), so the same `--source` command builds the image on Cloud Build with no separate `docker build`/`push` and no manual Artifact Registry step.
+A `backend/.gcloudignore` keeps `.env` and the local `.venv` out of the source uploaded to Cloud Build (distinct from `.dockerignore`, which governs the image build context).
+Key flags that preserve the architecture:
 
 ```bash
 gcloud run deploy trade-agent-backend \

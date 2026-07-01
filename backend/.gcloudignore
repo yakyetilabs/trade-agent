@@ -1,0 +1,29 @@
+# Controls what `gcloud run deploy --source` uploads to Cloud Build. This is DISTINCT from
+# .dockerignore (which governs the docker build context): without this file, gcloud would
+# tar the whole directory - including .env - into the Cloud Build source. Keep secrets and
+# cruft out of the upload, but KEEP the Dockerfile, .dockerignore, src/, and the lockfiles.
+
+# Secrets and local env files - MUST NOT be uploaded.
+.env
+.env.*
+
+# Local virtualenv - the image rebuilds it via `uv sync`.
+.venv/
+
+# Python caches and build artifacts.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Co-located unit tests aren't part of the runtime image.
+**/test_*.py
+
+# Eval reports (git-ignored) and any locally generated results.
+eval/results/
+
+# VCS and OS cruft.
+.git/
+.DS_Store
