@@ -1,0 +1,19 @@
+{
+  // Master TypeScript base for the monorepo. The frontend configs (frontend/tsconfig.json and
+  // frontend/tsconfig.node.json) explicitly extend this so compiler strictness lives in exactly
+  // one place and never drifts between projects (CLAUDE.md "Centralized Configuration Inheritance").
+  // The Python backend is type-checked by pyright and does not read this file.
+  "compilerOptions": {
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  }
+}
