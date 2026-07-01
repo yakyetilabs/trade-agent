@@ -1,6 +1,6 @@
 """Unit tests for the run_agent orchestrator.
 
-Hermetic by construction: the model is never built or called. ``_build_agent`` is
+Hermetic by construction: the model is never built or called. ``build_agent`` is
 replaced with a fake whose ``invoke`` appends tool calls to the ambient trace via the
 same ``record_tool_call`` seam the real tools use, so the orchestrator's extraction,
 fallback, and trace-persistence logic is exercised exactly as it would be live — with
@@ -106,7 +106,7 @@ def _draft_spec(text: str) -> _ToolCallSpec:
 
 
 def _install_agent(monkeypatch: pytest.MonkeyPatch, fake: _FakeAgent) -> None:
-    monkeypatch.setattr(agent, "_build_agent", lambda _model_id: fake)
+    monkeypatch.setattr(agent, "build_agent", lambda _model_id: fake)
 
 
 def _explode_if_built(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,7 +115,7 @@ def _explode_if_built(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(_model_id: str) -> object:
         raise AssertionError("the agent must not be built on this path")
 
-    monkeypatch.setattr(agent, "_build_agent", _boom)
+    monkeypatch.setattr(agent, "build_agent", _boom)
 
 
 def _capture_traces(monkeypatch: pytest.MonkeyPatch) -> list[AgentTrace]:
@@ -244,7 +244,7 @@ def test_normal_run_extracts_classification_draft_and_tokens(
     # Vendor scope is bound into runtime context, never a model-facing arg; the cap is applied.
     assert fake.invoked_with is not None
     assert fake.invoked_with["context"] == {"vendor_id": "V-001"}
-    assert fake.invoked_with["config"] == {"recursion_limit": agent._RECURSION_LIMIT}
+    assert fake.invoked_with["config"] == {"recursion_limit": agent.RECURSION_LIMIT}
     # Exactly one trace persisted, carrying the embedded tool calls and token split.
     assert len(captured) == 1
     assert len(captured[0].tool_calls) == 4
@@ -361,7 +361,7 @@ def test_build_agent_binds_vendor_context_and_the_four_tools(
 ) -> None:
     """The real create_agent graph carries the vendor context schema and the four tools.
 
-    Unlike the orchestrator tests above (which replace ``_build_agent`` wholesale), this
+    Unlike the orchestrator tests above (which replace ``build_agent`` wholesale), this
     builds the ACTUAL agent graph; only the chat model is swapped for a credential-free
     fake, so no Vertex SDK init or network call happens. It is the security-critical
     wiring check the faked tests cannot make: vendor scope must ride in the runtime
@@ -370,7 +370,7 @@ def test_build_agent_binds_vendor_context_and_the_four_tools(
     fake_model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
     monkeypatch.setattr(agent, "ChatGoogleGenerativeAI", lambda **_kwargs: fake_model)
 
-    compiled = agent._build_agent("gemini-2.5-flash")
+    compiled = agent.build_agent("gemini-2.5-flash")
 
     assert isinstance(compiled, CompiledStateGraph)
     # Vendor scope is bound as runtime context: the load-bearing isolation guarantee.
