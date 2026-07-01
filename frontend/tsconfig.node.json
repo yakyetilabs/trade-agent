@@ -1,0 +1,15 @@
+{
+  // Type-checks the build tooling itself (vite.config.ts) in a node context - separate from the
+  // app project so the browser code never sees node globals and vice versa. Also extends the base.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["vite.config.ts"]
+}

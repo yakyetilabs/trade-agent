@@ -1,0 +1,19 @@
+{
+  // The frontend application config. Extends the monorepo-root base (CLAUDE.md requires
+  // frontend/tsconfig.json to extend it) and adds the browser + bundler settings. Type-only;
+  // Vite/esbuild do the actual transpile, so noEmit is on. The Vite config file is type-checked
+  // separately by tsconfig.node.json (node globals, no DOM lib).
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src"]
+}

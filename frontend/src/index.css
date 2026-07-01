@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+/* The dark "AgentOps" theme. These @theme tokens become Tailwind utilities
+   (--color-surface -> bg-surface/text-surface/border-surface, --font-mono -> font-mono,
+   --ease-out-soft -> ease-out-soft). Palette, type, and motion are specified in
+   docs/FRONTEND_PLAN.md ("The dark AgentOps theme"). */
+@theme {
+  /* Ink scale - backgrounds, back to front */
+  --color-ink: #0b0e15;
+  --color-surface: #121722;
+  --color-elevated: #1a2130;
+  --color-hairline: #232c3d;
+
+  /* Text */
+  --color-fg: #e6edf6;
+  --color-fg-muted: #9aa7bd;
+  --color-fg-subtle: #6b7689;
+
+  /* One accent, used sparingly: primary actions, the active pipeline node, links */
+  --color-accent: #4c8dff;
+
+  /* Semantic states */
+  --color-warn: #e0a23b; /* held / draft */
+  --color-danger: #e5534b; /* escalated */
+  --color-success: #2ea88a; /* approved / cleared */
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+
+  /* Motion - 150-250ms ease-out; the soft pulse marks the active pipeline node (F2). */
+  --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  /* The active pipeline node breathes so the eye tracks the running stage. Keyframes nest in
+     @theme (Tailwind v4) so the `animate-soft-pulse` utility and its frames ship together. */
+  --animate-soft-pulse: soft-pulse 1.6s var(--ease-out-soft) infinite;
+  @keyframes soft-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-ink);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--color-accent) 30%, transparent);
+    color: var(--color-fg);
+  }
+
+  /* Thin dark scrollbars so the chrome matches the console. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-hairline) transparent;
+  }
+}
+
+@layer components {
+  /* Shared button system. Compose as `btn btn-primary` / `btn btn-ghost` so the base carries
+     layout + focus ring and the variant carries only color (F2 reuses these for the maker-checker
+     actions). Focus ring is the one place the accent shows on non-primary controls. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
+      transition-colors duration-150 ease-out-soft focus-visible:outline-none focus-visible:ring-2
+      focus-visible:ring-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-ink
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-accent text-white hover:bg-accent/90;
+  }
+  .btn-ghost {
+    @apply border border-hairline bg-transparent text-fg-muted hover:bg-elevated hover:text-fg;
+  }
+}
