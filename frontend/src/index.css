@@ -28,8 +28,21 @@
     sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
 
-  /* Motion - 150-250ms ease-out; the soft pulse on the active pipeline node lives with F2. */
+  /* Motion - 150-250ms ease-out; the soft pulse marks the active pipeline node (F2). */
   --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  /* The active pipeline node breathes so the eye tracks the running stage. Keyframes nest in
+     @theme (Tailwind v4) so the `animate-soft-pulse` utility and its frames ship together. */
+  --animate-soft-pulse: soft-pulse 1.6s var(--ease-out-soft) infinite;
+  @keyframes soft-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
 }
 
 @layer base {

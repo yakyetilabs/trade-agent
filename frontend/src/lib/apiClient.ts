@@ -56,7 +56,10 @@ export interface ApiClient {
   setDisposition(traceId: string, decision: DispositionDecision): Promise<DispositionResponse>;
 }
 
-async function toApiError(response: Response): Promise<ApiError> {
+/** Map a non-2xx `Response` to an `ApiError`, surfacing FastAPI's `{ detail }` when present.
+ *  Exported so the streaming client (src/lib/inquiryStream.ts) reports pre-stream failures - a 403
+ *  scope refusal, a 401, a 422 - through the same error type the JSON client uses. */
+export async function toApiError(response: Response): Promise<ApiError> {
   let detail: string | null = null;
   try {
     const body: unknown = await response.json();
