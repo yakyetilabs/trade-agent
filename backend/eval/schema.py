@@ -5,7 +5,7 @@ case declares only the assertions relevant to it; the scorer (``scoring.py``) ch
 ones present. Assertions lean on orchestrator-deterministic signals (disposition,
 escalation reason, injected intents, tool-call count) so guard/scope/escalation cases
 score identically across models; the model-dependent signals (cited ids, draft phrasing)
-are the quality axis the Flash-vs-Pro comparison actually measures.
+are the quality axis the Haiku-vs-Sonnet comparison actually measures.
 
 Grounding — that every cited shipment id is a real generated shipment owned by the
 case's vendor — is enforced by the co-located ``test_schema.py`` against the synthetic
@@ -22,11 +22,12 @@ _CASES_PATH = Path(__file__).parent / "cases.json"
 
 
 class EvalCategory(StrEnum):
-    """The five evaluation categories (mirrors DESIGN_DECISIONS.md §6)."""
+    """The four curated categories (mirrors DESIGN_DECISIONS.md §6) - one per
+    load-bearing system property: the grounded pipeline, the exact-fetch retrieval
+    mode, and the two deterministic pre-model guards."""
 
-    TARIFF_CLASSIFICATION = "tariff_classification"
-    IMPORT_FLAGS = "import_flags"
-    COMPLIANCE_QUERIES = "compliance_queries"
+    HAPPY_PATH = "happy_path"
+    EXACT_HTS_FETCH = "exact_hts_fetch"
     ESCALATION_TRIGGERS = "escalation_triggers"
     SCOPE_VIOLATIONS = "scope_violations"
 

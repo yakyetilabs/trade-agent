@@ -368,9 +368,9 @@ def test_build_agent_binds_vendor_context_and_the_four_tools(
     ``context_schema``, never as a model-facing tool argument the LLM could set or override.
     """
     fake_model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
-    monkeypatch.setattr(agent, "ChatGoogleGenerativeAI", lambda **_kwargs: fake_model)
+    monkeypatch.setattr(agent, "ChatAnthropicVertex", lambda **_kwargs: fake_model)
 
-    compiled = agent.build_agent("gemini-2.5-flash")
+    compiled = agent.build_agent(agent.VERTEX_PRIMARY_MODEL)
 
     assert isinstance(compiled, CompiledStateGraph)
     # Vendor scope is bound as runtime context: the load-bearing isolation guarantee.

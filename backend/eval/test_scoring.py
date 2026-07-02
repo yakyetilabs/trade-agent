@@ -47,7 +47,7 @@ def _case(category: EvalCategory, expect: Expect) -> EvalCase:
 
 def test_all_assertions_pass() -> None:
     case = _case(
-        EvalCategory.IMPORT_FLAGS,
+        EvalCategory.HAPPY_PATH,
         Expect(
             disposition="draft",
             intent_in=("manifest_flag_resolution", "tariff_lookup"),
@@ -64,7 +64,7 @@ def test_all_assertions_pass() -> None:
 
 def test_mismatches_fail_specific_assertions() -> None:
     case = _case(
-        EvalCategory.IMPORT_FLAGS,
+        EvalCategory.HAPPY_PATH,
         Expect(
             disposition="escalated",  # actual is draft
             tools_called=("retrieve_tariff_regulation",),  # not called
@@ -100,13 +100,13 @@ def test_escalation_result_scores_clean() -> None:
 def test_includes_any_and_excludes() -> None:
     cleared = _result(draft="Shipment S-1002 has cleared customs; there is no hold.")
     passing = _case(
-        EvalCategory.IMPORT_FLAGS,
+        EvalCategory.HAPPY_PATH,
         Expect(draft_includes_any=("cleared", "not held"), draft_excludes=("seized",)),
     )
     assert score_case(cleared, passing).passed
 
     failing = _case(
-        EvalCategory.IMPORT_FLAGS,
+        EvalCategory.HAPPY_PATH,
         Expect(draft_includes_any=("rejected", "denied")),  # neither present
     )
     assert not score_case(cleared, failing).passed
