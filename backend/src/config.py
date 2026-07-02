@@ -39,10 +39,17 @@ def parse_analyst_scopes(raw: str) -> dict[str, frozenset[str]]:
     return scopes
 
 
-def resolve_cors_origins(app_env: AppEnv, prod_origin: str) -> tuple[str, ...]:
-    """Local dev permits the Vite origin; production locks to the deployed frontend."""
+def resolve_cors_origins(app_env: AppEnv, prod_origins: str) -> tuple[str, ...]:
+    """Local dev permits the Vite origin; production locks to the deployed frontend origins.
+
+    Prod is a comma-separated list because the frontend is served from more than one host
+    (the custom domain plus Firebase's default ``*.web.app`` / ``*.firebaseapp.com``) - each
+    is a distinct browser origin under the CORS spec, so each needs an explicit allow entry.
+    An empty value returns ``()`` (no cross-origin access), which is the safe default for a
+    misconfigured deploy.
+    """
     if app_env == "production":
-        return (prod_origin,) if prod_origin else ()
+        return tuple(o.strip() for o in prod_origins.split(",") if o.strip())
     return ("http://localhost:5173", "http://127.0.0.1:5173")
 
 
@@ -53,7 +60,7 @@ def _normalize_app_env(raw: str) -> AppEnv:
 # --- Raw env reads: the ONLY os.getenv calls permitted in the codebase ---------
 _RAW_ANALYST_SCOPES: Final[str] = os.getenv("TRADE_AGENT_ANALYST_SCOPES", "")
 _RAW_APP_ENV: Final[str] = os.getenv("APP_ENV", "local")
-_RAW_PROD_ORIGIN: Final[str] = os.getenv("PROD_FRONTEND_ORIGIN", "")
+_RAW_PROD_ORIGINS: Final[str] = os.getenv("PROD_FRONTEND_ORIGINS", "")
 
 # --- Exported, typed, immutable constants --------------------------------------
 APP_ENV: Final[AppEnv] = _normalize_app_env(_RAW_APP_ENV)
@@ -61,7 +68,7 @@ APP_ENV: Final[AppEnv] = _normalize_app_env(_RAW_APP_ENV)
 # keys (being a key == permission to use the app at all).
 ANALYST_VENDOR_SCOPES: Final[dict[str, frozenset[str]]] = parse_analyst_scopes(_RAW_ANALYST_SCOPES)
 ALLOWED_USERS: Final[frozenset[str]] = frozenset(ANALYST_VENDOR_SCOPES.keys())
-CORS_ORIGINS: Final[tuple[str, ...]] = resolve_cors_origins(APP_ENV, _RAW_PROD_ORIGIN)
+CORS_ORIGINS: Final[tuple[str, ...]] = resolve_cors_origins(APP_ENV, _RAW_PROD_ORIGINS)
 
 GCP_PROJECT: Final[str] = os.getenv("GCP_PROJECT", "trade-agent-ff12a")
 GCP_REGION: Final[str] = os.getenv("GCP_REGION", "us-central1")

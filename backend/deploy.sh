@@ -37,6 +37,13 @@ if [[ -z "${TRADE_AGENT_ANALYST_SCOPES:-}" ]]; then
   exit 1
 fi
 
+# The CORS allow-list: every browser origin the frontend is served from. Split-origin
+# deploy (docs/DESIGN_DECISIONS.md §9) - the frontend calls the api. subdomain from at
+# least three hosts (the custom domain + Firebase's two default hostnames), each a
+# distinct browser origin under the CORS spec. Override with a comma-separated list if
+# adding more hostnames; the compiled default below matches the current live deploy.
+PROD_FRONTEND_ORIGINS="${PROD_FRONTEND_ORIGINS:-https://trade-agent.samir.codes,https://trade-agent-ff12a.web.app,https://trade-agent-ff12a.firebaseapp.com}"
+
 # --- Preflight: fail fast, and NEVER block on a prompt --------------------------------------
 # --quiet disables interactive prompts so a not-yet-enabled API can't leave the script hanging
 # on a hidden "enable and retry? (y/N)" read (that redirect-swallowed prompt is exactly what
@@ -80,6 +87,7 @@ APP_ENV: production
 GCP_PROJECT: "$PROJECT"
 GCP_REGION: "$REGION"
 TRADE_AGENT_ANALYST_SCOPES: "$TRADE_AGENT_ANALYST_SCOPES"
+PROD_FRONTEND_ORIGINS: "$PROD_FRONTEND_ORIGINS"
 EOF
 
 echo "==> Deploying '$SERVICE' to Cloud Run (project $PROJECT, region $REGION)"
