@@ -368,7 +368,9 @@ def test_build_agent_binds_vendor_context_and_the_four_tools(
     ``context_schema``, never as a model-facing tool argument the LLM could set or override.
     """
     fake_model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
-    monkeypatch.setattr(agent, "ChatAnthropicVertex", lambda **_kwargs: fake_model)
+    # Patch the provider seam so the real build_agent graph is constructed with a
+    # credential-free fake chat model (no Vertex SDK init, no network).
+    monkeypatch.setattr(agent, "build_chat_model", lambda _model_id: fake_model)
 
     compiled = agent.build_agent(agent.VERTEX_PRIMARY_MODEL)
 

@@ -495,8 +495,8 @@ def test_real_graph_streams_through_astream_events(monkeypatch: pytest.MonkeyPat
         usage_metadata={"input_tokens": 40, "output_tokens": 10, "total_tokens": 50},
     )
     fake_model = _BindableFake(responses=[draft_turn, final_turn])
-    # build_agent is the REAL one (not patched); only its chat-model constructor is swapped.
-    monkeypatch.setattr(agent, "ChatAnthropicVertex", lambda **_kwargs: fake_model)
+    # build_agent is the REAL one (not patched); only the provider seam is swapped.
+    monkeypatch.setattr(agent, "build_chat_model", lambda _model_id: fake_model)
 
     events = _drain("V-001", "Draft a clearance response for S-1001.")
 

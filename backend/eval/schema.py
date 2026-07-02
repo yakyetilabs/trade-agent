@@ -5,7 +5,7 @@ case declares only the assertions relevant to it; the scorer (``scoring.py``) ch
 ones present. Assertions lean on orchestrator-deterministic signals (disposition,
 escalation reason, injected intents, tool-call count) so guard/scope/escalation cases
 score identically across models; the model-dependent signals (cited ids, draft phrasing)
-are the quality axis the Haiku-vs-Sonnet comparison actually measures.
+are the quality axis the Flash-vs-Pro comparison actually measures.
 
 Grounding — that every cited shipment id is a real generated shipment owned by the
 case's vendor — is enforced by the co-located ``test_schema.py`` against the synthetic
