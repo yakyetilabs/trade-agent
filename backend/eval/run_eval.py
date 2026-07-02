@@ -1,4 +1,4 @@
-"""Haiku-vs-Sonnet evaluation runner (live).
+"""Flash-vs-Pro evaluation runner (live).
 
 Runs every case in ``cases.json`` through ``run_agent`` once per model, scores each with
 the deterministic scorer, and writes a raw JSON record plus a human-readable markdown
@@ -9,7 +9,7 @@ schema it depends on are unit-tested hermetically (``test_scoring.py`` / ``test_
 Usage (from ``backend/``)::
 
     uv run python -m eval.run_eval                 # both models, all cases
-    uv run python -m eval.run_eval --models haiku  # primary only
+    uv run python -m eval.run_eval --models flash  # primary only
     uv run python -m eval.run_eval --category escalation_triggers
 """
 
@@ -27,7 +27,7 @@ from src.agent import run_agent
 from src.config import VERTEX_EVAL_MODEL, VERTEX_PRIMARY_MODEL
 
 _RESULTS_DIR = Path(__file__).parent / "results"
-_MODELS: dict[str, str] = {"haiku": VERTEX_PRIMARY_MODEL, "sonnet": VERTEX_EVAL_MODEL}
+_MODELS: dict[str, str] = {"flash": VERTEX_PRIMARY_MODEL, "pro": VERTEX_EVAL_MODEL}
 
 
 @dataclass(frozen=True)
@@ -91,7 +91,7 @@ def _percentile(values: Sequence[float], pct: float) -> float:
 
 
 def summarize(rows: Sequence[RunRow], labels: Sequence[str]) -> str:
-    """Render a markdown Haiku-vs-Sonnet report: accuracy by category, latency, cost."""
+    """Render a markdown Flash-vs-Pro report: accuracy by category, latency, cost."""
     categories = sorted({r.category for r in rows})
     lines: list[str] = [
         f"# Eval Report — {datetime.now(UTC).isoformat(timespec='seconds')}",
@@ -136,8 +136,8 @@ def summarize(rows: Sequence[RunRow], labels: Sequence[str]) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Haiku-vs-Sonnet eval runner")
-    parser.add_argument("--models", default="haiku,sonnet", help="comma list of: haiku, sonnet")
+    parser = argparse.ArgumentParser(description="Flash-vs-Pro eval runner")
+    parser.add_argument("--models", default="flash,pro", help="comma list of: flash, pro")
     parser.add_argument("--category", default=None, help="run only one category")
     args = parser.parse_args()
 

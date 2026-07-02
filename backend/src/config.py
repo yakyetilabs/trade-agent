@@ -73,19 +73,12 @@ CORS_ORIGINS: Final[tuple[str, ...]] = resolve_cors_origins(APP_ENV, _RAW_PROD_O
 GCP_PROJECT: Final[str] = os.getenv("GCP_PROJECT", "trade-agent-ff12a")
 GCP_REGION: Final[str] = os.getenv("GCP_REGION", "us-central1")
 
-# Chat models are Claude on Vertex (Model Garden). Vertex addresses dated Claude releases
-# with an ``@`` version separator — NOT the hyphenated first-party ids.
-VERTEX_PRIMARY_MODEL: Final[str] = os.getenv("VERTEX_PRIMARY_MODEL", "claude-haiku-4-5@20251001")
-VERTEX_EVAL_MODEL: Final[str] = os.getenv("VERTEX_EVAL_MODEL", "claude-sonnet-4-5@20250929")
-# Claude on Vertex routes through its own endpoint locality, independent of GCP_REGION
-# (which stays us-central1 for Cloud Run / Firestore / embeddings). ``global`` is the
-# documented recommendation: dynamic routing, maximum availability, and no pricing
-# premium — regional endpoints (e.g. us-east5) add 10% for data-residency guarantees
-# this demo does not need.
-ANTHROPIC_VERTEX_REGION: Final[str] = os.getenv("ANTHROPIC_VERTEX_REGION", "global")
+# Chat + eval models are Gemini on Vertex AI (via langchain-google-genai, vertexai=True).
+# One provider seam binds them: src/model_provider.py. Do not duplicate these ids elsewhere.
+VERTEX_PRIMARY_MODEL: Final[str] = os.getenv("VERTEX_PRIMARY_MODEL", "gemini-2.5-flash")
+VERTEX_EVAL_MODEL: Final[str] = os.getenv("VERTEX_EVAL_MODEL", "gemini-2.5-pro")
 
-# Embeddings stay on Gemini — Anthropic provides no embedding models and the Pinecone
-# index is fixed at 768 dims.
+# Embeddings also on Gemini; the Pinecone index is fixed at 768 dims.
 VERTEX_EMBEDDING_MODEL: Final[str] = os.getenv("VERTEX_EMBEDDING_MODEL", "gemini-embedding-001")
 VERTEX_EMBEDDING_DIM: Final[int] = int(os.getenv("VERTEX_EMBEDDING_DIM", "768"))
 

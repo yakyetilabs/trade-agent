@@ -8,11 +8,11 @@ dependencies = [
     "pydantic>=2.7",
     "firebase-admin>=6.5",
     "google-cloud-firestore>=2.16",
-    # Model + KB layer: chat is Claude on Vertex via ChatAnthropicVertex (the [anthropic]
-    # extra pulls the anthropic SDK whose AnthropicVertex client it wraps; ADC auth, no
-    # API key); embeddings stay on Gemini via the raw google-genai embed_content call
-    # (explicit 768-dim); stored and queried through the Pinecone vector store.
-    "langchain-google-vertexai[anthropic]>=3.2",
+    # Model + KB layer: chat + eval via langchain-google-genai (ChatGoogleGenerativeAI on
+    # Vertex, vertexai=True; ADC auth, no API key); embeddings via the raw google-genai
+    # embed_content call (explicit 768-dim); stored and queried through the Pinecone vector
+    # store. The concrete provider is bound in one seam: src/model_provider.py.
+    "langchain-google-genai>=4.2.6",
     "google-genai>=2.10.0",
     "langchain-pinecone>=0.2",
     # Agent phase: LangGraph state machine + ToolRuntime vendor scoping. The agent loop

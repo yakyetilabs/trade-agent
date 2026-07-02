@@ -18,10 +18,10 @@ from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import tool
-from langchain_google_vertexai.model_garden import ChatAnthropicVertex
 from pydantic import BaseModel, Field
 
-from src.config import ANTHROPIC_VERTEX_REGION, GCP_PROJECT, VERTEX_PRIMARY_MODEL
+from src.config import VERTEX_PRIMARY_MODEL
+from src.model_provider import build_chat_model
 from src.models import ImportClassification, InquiryIntent, RestrictionLevel
 from src.tracing.trace_context import record_tool_call
 
@@ -58,17 +58,13 @@ class _ClassifierOutput(BaseModel):
 
 
 def _classify_once(inquiry: str, model_id: str | None) -> _ClassifierOutput:
-    """Single structured Vertex call — the test seam for this tool."""
-    # No extended thinking here, deliberately: with_structured_output binds the schema
-    # via forced tool_choice ({"type": "tool"}), which the API rejects when thinking is
-    # enabled - and a router wants cheap, deterministic (temperature 0) output anyway.
-    chat = ChatAnthropicVertex(
-        project=GCP_PROJECT,
-        location=ANTHROPIC_VERTEX_REGION,
-        model_name=model_id or VERTEX_PRIMARY_MODEL,
-        temperature=0.0,
-        max_output_tokens=1024,
-    )
+    """Single structured Vertex call — the test seam for this tool.
+
+    Built from the shared provider seam; ``with_structured_output`` constrains the model to
+    the four routing intents. A router wants cheap, deterministic output, which the seam's
+    ``temperature=0`` gives.
+    """
+    chat = build_chat_model(model_id or VERTEX_PRIMARY_MODEL)
     structured: Runnable[LanguageModelInput, _ClassifierOutput] = cast(
         "Runnable[LanguageModelInput, _ClassifierOutput]",
         chat.with_structured_output(_ClassifierOutput),

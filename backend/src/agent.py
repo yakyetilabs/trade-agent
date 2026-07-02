@@ -11,9 +11,10 @@ runners share one implementation and persist one identical :class:`~src.models.A
    references short-circuit to an audited trace; the model never runs.
 3. **Vendor resolution** - an unknown ``vendor_id`` is a hard reject (404 on the sync path,
    a terminal ``error`` event on the stream). The only step that rejects a well-formed run.
-4. :func:`build_agent` - a fresh tool-calling agent (Claude on Vertex, extended thinking
-   enabled) bound to the :class:`~src.tools.vendor_context.VendorContext` schema. Built per
-   run - chat models carry per-invocation tool bindings and must not be memoized.
+4. :func:`build_agent` - a fresh tool-calling agent (the model comes from the provider
+   seam :func:`src.model_provider.build_chat_model`) bound to the
+   :class:`~src.tools.vendor_context.VendorContext` schema. Built per run - chat models
+   carry per-invocation tool bindings and must not be memoized.
 5. **Invoke** - the runner drives the agent inside a
    :func:`~src.tracing.trace_context.trace_context` so every tool call appends to one
    ambient trace. ``run_agent`` invokes synchronously; ``stream_agent_run`` drives the same
@@ -40,12 +41,12 @@ from typing import Any, Literal, NamedTuple
 
 from langchain.agents import create_agent
 from langchain_core.messages import BaseMessage, HumanMessage
-from langchain_google_vertexai.model_garden import ChatAnthropicVertex
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
 
 from src import repository
-from src.config import ANTHROPIC_VERTEX_REGION, GCP_PROJECT, VERTEX_PRIMARY_MODEL
+from src.config import VERTEX_PRIMARY_MODEL
+from src.model_provider import build_chat_model
 from src.models import (
     AgentTrace,
     ImportClassification,
@@ -257,22 +258,14 @@ def build_agent(model_id: str) -> CompiledStateGraph[Any, VendorContext, Any, An
     deprecated ``langgraph.prebuilt.create_react_agent``). The context type-param is pinned
     to :class:`VendorContext` - ``create_agent`` threads it into the compiled graph's return
     type, so the ``context=`` kwarg at the invoke site type-checks with no cast; the
-    state/input/output params are langgraph internals we treat opaquely. Isolated so tests
-    can substitute a fake agent (or a fake chat model) without a model or credentials.
+    state/input/output params are langgraph internals we treat opaquely.
+
+    The chat model comes from the provider seam
+    :func:`src.model_provider.build_chat_model`, so this function names no concrete model
+    class - it only wires tools, prompt, and the vendor context. Isolated so tests can
+    substitute a fake agent (or, via the seam, a fake chat model) without credentials.
     """
-    # Thinking rides in model_kwargs - the class has no dedicated field for it. Two
-    # coupled constraints: budget_tokens must stay below max_output_tokens (thinking
-    # bills as output), and extended thinking rejects pinned sampling - temperature
-    # stays at the Anthropic default (1.0); grounding lives in the system prompt +
-    # tools, not in greedy decoding.
-    model = ChatAnthropicVertex(
-        project=GCP_PROJECT,
-        location=ANTHROPIC_VERTEX_REGION,
-        model_name=model_id,
-        temperature=1.0,
-        max_output_tokens=4096,
-        model_kwargs={"thinking": {"type": "enabled", "budget_tokens": 2048}},
-    )
+    model = build_chat_model(model_id)
     return create_agent(
         model=model,
         tools=[
@@ -316,14 +309,13 @@ def _extract_draft(tool_calls: tuple[ToolCallLog, ...]) -> str | None:
 class _TokenUsage(NamedTuple):
     """The run's billable token split, summed across its AI messages.
 
-    Sourced from each message's standardized ``usage_metadata`` (langchain-core), which
-    ``langchain-google-vertexai`` fills from the native Anthropic counts: ``input_tokens``
-    <- input + cache_read + cache_creation (Anthropic's raw ``input_tokens`` excludes
-    cached tokens; the lib rolls them back in) and ``output_tokens`` <- verbatim.
-    Thinking bills at the OUTPUT rate and Anthropic exposes NO reasoning sub-split (no
-    ``output_token_details.reasoning``), so ``thoughts_tokens`` reads 0 on this provider
-    while the thinking spend stays inside ``output_tokens``; ``prompt + output == total``
-    still holds.
+    Read from each message's standardized ``usage_metadata`` (langchain-core), so the
+    accounting is provider-neutral: ``input_tokens`` is the prompt cost, ``output_tokens``
+    the full generated cost. On Vertex thinking bills at the OUTPUT rate, so ``output_tokens``
+    already folds in any reasoning tokens and ``prompt + output == total`` holds. When the
+    provider exposes a reasoning sub-split - Gemini reports it under
+    ``output_token_details.reasoning`` - ``thoughts_tokens`` surfaces it for the cost view;
+    providers that don't leave it 0 while the spend still sits inside ``output_tokens``.
     """
 
     prompt_tokens: int
@@ -353,7 +345,7 @@ def _sum_tokens(messages: list[BaseMessage]) -> _TokenUsage | None:
         prompt += int(usage.get("input_tokens", 0))
         output += int(usage.get("output_tokens", 0))
         total += int(usage.get("total_tokens", 0))
-        # Stays 0 on Anthropic - no reasoning sub-split is exposed (see _TokenUsage).
+        # Populated when the provider exposes a reasoning sub-split (Gemini does); else 0.
         thoughts += int((usage.get("output_token_details") or {}).get("reasoning", 0))
     return _TokenUsage(prompt, output, thoughts, total) if found else None
 
@@ -429,7 +421,7 @@ def run_agent(vendor_id: str, inquiry: str, model_id: str | None = None) -> Agen
 
     ``vendor_id`` is the deterministically resolved scope (validated against the allowlist
     and dropdown upstream); ``inquiry`` is the analyst's raw question. ``model_id`` overrides
-    the primary model - used by the Haiku-vs-Sonnet eval. The async, SSE-emitting variant
+    the primary model - used by the Flash-vs-Pro eval. The async, SSE-emitting variant
     is :func:`src.streaming.stream_agent_run`; both share the steps documented above.
     """
     meta = new_run(vendor_id, inquiry, model_id)
