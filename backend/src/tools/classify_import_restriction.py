@@ -18,10 +18,10 @@ from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import tool
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_vertexai.model_garden import ChatAnthropicVertex
 from pydantic import BaseModel, Field
 
-from src.config import GCP_PROJECT, GCP_REGION, VERTEX_PRIMARY_MODEL
+from src.config import ANTHROPIC_VERTEX_REGION, GCP_PROJECT, VERTEX_PRIMARY_MODEL
 from src.models import ImportClassification, InquiryIntent, RestrictionLevel
 from src.tracing.trace_context import record_tool_call
 
@@ -59,12 +59,15 @@ class _ClassifierOutput(BaseModel):
 
 def _classify_once(inquiry: str, model_id: str | None) -> _ClassifierOutput:
     """Single structured Vertex call — the test seam for this tool."""
-    chat = ChatGoogleGenerativeAI(
-        model=model_id or VERTEX_PRIMARY_MODEL,
-        vertexai=True,
+    # No extended thinking here, deliberately: with_structured_output binds the schema
+    # via forced tool_choice ({"type": "tool"}), which the API rejects when thinking is
+    # enabled - and a router wants cheap, deterministic (temperature 0) output anyway.
+    chat = ChatAnthropicVertex(
         project=GCP_PROJECT,
-        location=GCP_REGION,
+        location=ANTHROPIC_VERTEX_REGION,
+        model_name=model_id or VERTEX_PRIMARY_MODEL,
         temperature=0.0,
+        max_output_tokens=1024,
     )
     structured: Runnable[LanguageModelInput, _ClassifierOutput] = cast(
         "Runnable[LanguageModelInput, _ClassifierOutput]",

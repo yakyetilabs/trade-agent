@@ -20,6 +20,7 @@ This is a living document; keep appending as the deploy phase continues.
 - [In a polyglot monorepo, each ecosystem owns its own tooling root](#in-a-polyglot-monorepo-each-ecosystem-owns-its-own-tooling-root)
 - [Verify CLI and console behavior against current docs](#verify-cli-and-console-behavior-against-current-docs)
 - [The actual dials for cost vs. availability on a scale-to-zero service](#the-actual-dials-for-cost-vs-availability-on-a-scale-to-zero-service)
+- [Model-API feature constraints compose; verify the combination, not each feature alone](#model-api-feature-constraints-compose-verify-the-combination-not-each-feature-alone)
 - [Open questions / to verify next](#open-questions--to-verify-next)
 
 ## A Firebase project is a GCP project
@@ -128,6 +129,17 @@ This is a living document; keep appending as the deploy phase continues.
   Too high risks one instance running out of memory under a heavy workload (an LLM call, a large payload); too low wastes instances on light ones.
 - A maximum-instance cap bounds the blast radius of a traffic spike or a runaway client, on both your own cost and any downstream rate-limited dependency.
 - Request timeout needs to be raised above the platform default for long-lived responses, such as Server-Sent Events or a slow model generation.
+
+## Model-API feature constraints compose; verify the combination, not each feature alone
+
+- LLM APIs constrain feature combinations, not just individual parameters: on Anthropic models, extended thinking rejects forced tool choice (`tool_choice: any/tool` errors when thinking is enabled) and pins sampling (temperature must stay at its default).
+  Each feature works alone; the 400 only appears when they meet - and only at runtime, because mocked unit tests never hit the real endpoint.
+- Framework abstractions hide which combination you are actually sending.
+  LangChain's `with_structured_output` compiles to a forced tool choice under the hood, so "enable thinking" plus "use structured output" silently becomes an invalid request pair even though neither line of code mentions `tool_choice`.
+  One grep through the installed adapter's source revealed this in seconds; the docs alone did not connect the two.
+- A migration snippet drafted from one doc page can carry an invalid combination that no static check catches.
+  Concrete hit here: the planned Claude-on-Vertex constructor paired `temperature=0.0` with thinking enabled; verifying the extended-thinking doc plus the adapter source forced a split - the thinking-on agent loop keeps default sampling, and the structured-output classifier keeps `temperature=0` but drops thinking.
+- Practice: before swapping model providers, list the features each call site uses (thinking, structured output, forced tools, sampling pins), check the provider's compatibility rules for the pairs, and confirm with one live smoke call - the only layer where combination errors actually surface.
 
 ## Open questions / to verify next
 

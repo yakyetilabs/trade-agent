@@ -496,7 +496,7 @@ def test_real_graph_streams_through_astream_events(monkeypatch: pytest.MonkeyPat
     )
     fake_model = _BindableFake(responses=[draft_turn, final_turn])
     # build_agent is the REAL one (not patched); only its chat-model constructor is swapped.
-    monkeypatch.setattr(agent, "ChatGoogleGenerativeAI", lambda **_kwargs: fake_model)
+    monkeypatch.setattr(agent, "ChatAnthropicVertex", lambda **_kwargs: fake_model)
 
     events = _drain("V-001", "Draft a clearance response for S-1001.")
 

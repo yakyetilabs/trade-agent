@@ -11,10 +11,9 @@ runners share one implementation and persist one identical :class:`~src.models.A
    references short-circuit to an audited trace; the model never runs.
 3. **Vendor resolution** - an unknown ``vendor_id`` is a hard reject (404 on the sync path,
    a terminal ``error`` event on the stream). The only step that rejects a well-formed run.
-4. :func:`build_agent` - a fresh tool-calling agent (Gemini Flash, ``temperature=0``) bound
-   to the :class:`~src.tools.vendor_context.VendorContext` schema. Built per run - chat
-   models carry per-invocation tool bindings and must not be memoized; the Vertex SDK init
-   is the singleton.
+4. :func:`build_agent` - a fresh tool-calling agent (Claude on Vertex, extended thinking
+   enabled) bound to the :class:`~src.tools.vendor_context.VendorContext` schema. Built per
+   run - chat models carry per-invocation tool bindings and must not be memoized.
 5. **Invoke** - the runner drives the agent inside a
    :func:`~src.tracing.trace_context.trace_context` so every tool call appends to one
    ambient trace. ``run_agent`` invokes synchronously; ``stream_agent_run`` drives the same
@@ -41,12 +40,12 @@ from typing import Any, Literal, NamedTuple
 
 from langchain.agents import create_agent
 from langchain_core.messages import BaseMessage, HumanMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_vertexai.model_garden import ChatAnthropicVertex
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
 
 from src import repository
-from src.config import GCP_PROJECT, GCP_REGION, VERTEX_PRIMARY_MODEL
+from src.config import ANTHROPIC_VERTEX_REGION, GCP_PROJECT, VERTEX_PRIMARY_MODEL
 from src.models import (
     AgentTrace,
     ImportClassification,
@@ -261,12 +260,18 @@ def build_agent(model_id: str) -> CompiledStateGraph[Any, VendorContext, Any, An
     state/input/output params are langgraph internals we treat opaquely. Isolated so tests
     can substitute a fake agent (or a fake chat model) without a model or credentials.
     """
-    model = ChatGoogleGenerativeAI(
-        model=model_id,
-        vertexai=True,
+    # Thinking rides in model_kwargs - the class has no dedicated field for it. Two
+    # coupled constraints: budget_tokens must stay below max_output_tokens (thinking
+    # bills as output), and extended thinking rejects pinned sampling - temperature
+    # stays at the Anthropic default (1.0); grounding lives in the system prompt +
+    # tools, not in greedy decoding.
+    model = ChatAnthropicVertex(
         project=GCP_PROJECT,
-        location=GCP_REGION,
-        temperature=0.0,
+        location=ANTHROPIC_VERTEX_REGION,
+        model_name=model_id,
+        temperature=1.0,
+        max_output_tokens=4096,
+        model_kwargs={"thinking": {"type": "enabled", "budget_tokens": 2048}},
     )
     return create_agent(
         model=model,
@@ -312,12 +317,13 @@ class _TokenUsage(NamedTuple):
     """The run's billable token split, summed across its AI messages.
 
     Sourced from each message's standardized ``usage_metadata`` (langchain-core), which
-    ``langchain-google-genai`` fills from the native Vertex counts: ``input_tokens`` <-
-    ``prompt_token_count`` and ``output_tokens`` <- ``candidates_token_count +
-    thoughts_token_count``. On Vertex thinking bills at the OUTPUT rate, so
-    ``output_tokens`` already folds in ``thoughts_tokens`` and ``prompt + output ==
-    total``. The native counts are NOT exposed on ``response_metadata`` for this
-    non-streaming invoke path, so ``usage_metadata`` is the source of record.
+    ``langchain-google-vertexai`` fills from the native Anthropic counts: ``input_tokens``
+    <- input + cache_read + cache_creation (Anthropic's raw ``input_tokens`` excludes
+    cached tokens; the lib rolls them back in) and ``output_tokens`` <- verbatim.
+    Thinking bills at the OUTPUT rate and Anthropic exposes NO reasoning sub-split (no
+    ``output_token_details.reasoning``), so ``thoughts_tokens`` reads 0 on this provider
+    while the thinking spend stays inside ``output_tokens``; ``prompt + output == total``
+    still holds.
     """
 
     prompt_tokens: int
@@ -347,6 +353,7 @@ def _sum_tokens(messages: list[BaseMessage]) -> _TokenUsage | None:
         prompt += int(usage.get("input_tokens", 0))
         output += int(usage.get("output_tokens", 0))
         total += int(usage.get("total_tokens", 0))
+        # Stays 0 on Anthropic - no reasoning sub-split is exposed (see _TokenUsage).
         thoughts += int((usage.get("output_token_details") or {}).get("reasoning", 0))
     return _TokenUsage(prompt, output, thoughts, total) if found else None
 
@@ -422,7 +429,7 @@ def run_agent(vendor_id: str, inquiry: str, model_id: str | None = None) -> Agen
 
     ``vendor_id`` is the deterministically resolved scope (validated against the allowlist
     and dropdown upstream); ``inquiry`` is the analyst's raw question. ``model_id`` overrides
-    the primary model - used by the Phase 4 Flash-vs-Pro eval. The async, SSE-emitting variant
+    the primary model - used by the Haiku-vs-Sonnet eval. The async, SSE-emitting variant
     is :func:`src.streaming.stream_agent_run`; both share the steps documented above.
     """
     meta = new_run(vendor_id, inquiry, model_id)

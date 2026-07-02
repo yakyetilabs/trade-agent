@@ -1,19 +1,23 @@
 """Suite-integrity + grounding tests for the eval cases.
 
-These run hermetically (no model): they validate that ``cases.json`` parses, covers all
-five categories, has unique ids, and — critically — that every cited shipment is a real
-generated shipment owned by the case's vendor. That last check makes it impossible for
-the suite to silently drift away from the synthetic seed data.
+These run hermetically (no model): they validate that ``cases.json`` parses, keeps the
+curated 4x3 shape (12 cases, 3 per category), has unique ids, and - critically - that
+every cited shipment is a real generated shipment owned by the case's vendor. That last
+check makes it impossible for the suite to silently drift away from the synthetic seed
+data.
 """
+
+from collections import Counter
 
 from eval.schema import EvalCategory, load_cases
 from src.data.generators import build_shipments, build_vendors
 
 
-def test_suite_loads_and_covers_all_categories() -> None:
+def test_suite_is_the_curated_twelve() -> None:
+    """The curation contract: exactly 12 cases, exactly 3 per category (the 4x3 grid)."""
     cases = load_cases()
-    assert len(cases) >= 30
-    assert {c.category for c in cases} == set(EvalCategory)
+    assert len(cases) == 12
+    assert Counter(c.category for c in cases) == {category: 3 for category in EvalCategory}
 
 
 def test_case_ids_are_unique() -> None:
