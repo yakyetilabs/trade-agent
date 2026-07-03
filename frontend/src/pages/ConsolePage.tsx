@@ -87,9 +87,11 @@ export function ConsolePage() {
 
       {state.phase !== "idle" ? <PipelineView stages={state.stages} guard={state.guard} /> : null}
       {state.reasoning ? (
-        <ReasoningPanel reasoning={state.reasoning} streaming={running} />
+        <ReasoningPanel reasoning={state.reasoning} streaming={running} animate />
       ) : null}
-      {state.answerText ? <TextStream text={state.answerText} streaming={running} /> : null}
+      {state.answerText ? (
+        <TextStream text={state.answerText} streaming={running} animate />
+      ) : null}
       {state.phase === "error" ? <RunError message={state.error} /> : null}
       {state.result ? (
         <DraftPanel key={state.result.trace_id} result={state.result} guard={state.guard} />

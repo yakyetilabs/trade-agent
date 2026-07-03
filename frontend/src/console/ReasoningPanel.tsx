@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { StreamingCaret } from "./StreamingCaret";
+import { useTypewriter } from "./useTypewriter";
 
 /** A chevron that rotates to point down when the panel is open. */
 function Chevron({ open }: { open: boolean }) {
@@ -30,27 +31,34 @@ function Chevron({ open }: { open: boolean }) {
  * While streaming, a "Thinking" pulse shows and the well auto-follows the newest thought (log-tail).
  * Advisory only: the reasoning is never part of the authoritative grounded draft. Reused by the Audit
  * Trail's trace detail to render the persisted `thinking_content` (static, `streaming={false}`, and
- * `defaultOpen={false}` so it stays folded in the dense record). Mount only when `reasoning` is set.
+ * `defaultOpen={false}` so it stays folded in the dense record). `animate` (Console only) types the
+ * text in a few characters per frame so coarse `thinking_delta` chunks read as steady typing, not
+ * lurching blocks; the audit render leaves it off for the full text at once. Mount only when
+ * `reasoning` is set.
  */
 export function ReasoningPanel({
   reasoning,
   streaming,
   defaultOpen = true,
+  animate = false,
 }: {
   reasoning: string;
   streaming: boolean;
   defaultOpen?: boolean;
+  animate?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const regionId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const shown = useTypewriter(reasoning, animate);
 
-  // Keep the freshest reasoning in view while it streams in, like tailing a log.
+  // Keep the freshest reasoning in view while it types in, like tailing a log - follow the revealed
+  // text so the scroll tracks the typewriter, not the (already-complete) target.
   useEffect(() => {
-    if (streaming && open && scrollRef.current) {
+    if (open && scrollRef.current && (streaming || shown !== reasoning)) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [reasoning, streaming, open]);
+  }, [shown, reasoning, streaming, open]);
 
   return (
     <section className="mt-6 rounded-xl border border-hairline bg-surface p-5">
@@ -86,7 +94,7 @@ export function ReasoningPanel({
           className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-hairline bg-ink/50 p-3"
         >
           <p className="whitespace-pre-wrap text-xs leading-relaxed text-fg-muted">
-            {reasoning}
+            {shown}
             {streaming ? <StreamingCaret /> : null}
           </p>
         </div>
