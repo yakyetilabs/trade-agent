@@ -264,8 +264,12 @@ def build_agent(model_id: str) -> CompiledStateGraph[Any, VendorContext, Any, An
     :func:`src.model_provider.build_chat_model`, so this function names no concrete model
     class - it only wires tools, prompt, and the vendor context. Isolated so tests can
     substitute a fake agent (or, via the seam, a fake chat model) without credentials.
+
+    It is built with ``stream_thoughts=True`` so the loop's reasoning is available to the
+    streaming runner as ``thinking_delta`` events; the synchronous path simply ignores the
+    returned thought text.
     """
-    model = build_chat_model(model_id)
+    model = build_chat_model(model_id, stream_thoughts=True)
     return create_agent(
         model=model,
         tools=[
@@ -355,10 +359,15 @@ def build_run_trace(
     tool_calls: tuple[ToolCallLog, ...],
     result_messages: list[BaseMessage],
     invoke_error: Exception | None,
+    thinking_content: str | None = None,
 ) -> AgentTrace:
     """Steps 6-7 (trace assembly): recover the classification + draft from the recorded
     tool calls, apply the no-draft fallback, sum the billable tokens, and assemble the
     single audit trace. Shared by the sync and streaming runners; the caller persists it.
+
+    ``thinking_content`` is the streaming runner's accumulated reasoning - the persisted form
+    of its ``thinking_delta`` events. The synchronous runner leaves it ``None`` (it emits no
+    deltas); either way the draft, produced by the draft tool, stays the authoritative output.
     """
     classification = _extract_classification(tool_calls)
     draft_response = _extract_draft(tool_calls)
@@ -386,6 +395,7 @@ def build_run_trace(
         classification=classification,
         tool_calls=tool_calls,
         draft_response=draft_response,
+        thinking_content=thinking_content,
         disposition=TraceDisposition.DRAFT,
         model=meta.model,
         duration_ms=_elapsed_ms(meta),

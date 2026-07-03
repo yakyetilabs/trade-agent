@@ -153,3 +153,33 @@ def test_agent_trace_rejects_malformed_vendor_id() -> None:
             disposition=TraceDisposition.ESCALATED,
             model="gemini-2.5-flash",
         )
+
+
+def test_agent_trace_thinking_content_defaults_none() -> None:
+    """thinking_content is optional — None on the synchronous and pre-model-guard paths."""
+    trace = AgentTrace(
+        trace_id="tr-think",
+        timestamp="2026-06-25T00:00:00Z",
+        vendor_id="V-003",
+        user_inquiry="Why is my shipment held?",
+        disposition=TraceDisposition.DRAFT,
+        model="gemini-2.5-flash",
+    )
+    assert trace.thinking_content is None
+
+
+def test_agent_trace_persists_thinking_content_through_json_dump() -> None:
+    """The streamed reasoning round-trips through the Firestore JSON dump."""
+    trace = AgentTrace(
+        trace_id="tr-think",
+        timestamp="2026-06-25T00:00:00Z",
+        vendor_id="V-003",
+        user_inquiry="Why is my shipment held?",
+        draft_response="Draft text.",
+        thinking_content="Reviewing S-1001 against HTS 8517.13.0000.",
+        disposition=TraceDisposition.DRAFT,
+        model="gemini-2.5-flash",
+    )
+    dumped = trace.model_dump(mode="json")
+    assert dumped["thinking_content"] == "Reviewing S-1001 against HTS 8517.13.0000."
+    assert AgentTrace.model_validate(dumped) == trace

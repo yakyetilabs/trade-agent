@@ -369,8 +369,9 @@ def test_build_agent_binds_vendor_context_and_the_four_tools(
     """
     fake_model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
     # Patch the provider seam so the real build_agent graph is constructed with a
-    # credential-free fake chat model (no Vertex SDK init, no network).
-    monkeypatch.setattr(agent, "build_chat_model", lambda _model_id: fake_model)
+    # credential-free fake chat model (no Vertex SDK init, no network). build_agent passes
+    # stream_thoughts=True, so the fake seam must accept the keyword.
+    monkeypatch.setattr(agent, "build_chat_model", lambda _model_id, **_kwargs: fake_model)
 
     compiled = agent.build_agent(agent.VERTEX_PRIMARY_MODEL)
 

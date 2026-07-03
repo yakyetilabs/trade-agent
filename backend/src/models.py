@@ -243,6 +243,12 @@ class AgentTrace(BaseModel):
     classification: ImportClassification | None = None
     tool_calls: tuple[ToolCallLog, ...] = ()
     draft_response: str | None = None
+    # The model's streamed reasoning (Gemini ``thinking``), accumulated from the run's
+    # ``thinking_delta`` events by the streaming runner and persisted for the audit-trail
+    # reasoning disclosure. ``None`` on the synchronous path (no deltas) and on the pre-model
+    # guard paths (the model never ran); the draft, produced by the draft tool, is the
+    # authoritative output, never this advisory text.
+    thinking_content: str | None = None
     disposition: TraceDisposition
     model: str
     escalation_reason: str | None = None

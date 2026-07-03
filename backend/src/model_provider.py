@@ -19,18 +19,28 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from src.config import GCP_PROJECT, GCP_REGION
 
 
-def build_chat_model(model_id: str) -> BaseChatModel:
+def build_chat_model(model_id: str, *, stream_thoughts: bool = False) -> BaseChatModel:
     """Construct a fresh chat model for ``model_id``, configured for this deployment.
 
     Built per call, never memoized: a chat model carries per-invocation tool bindings, so
     the agent loop needs a clean instance each run (the Vertex SDK init underneath is the
     singleton). ``temperature=0`` for deterministic, reproducible output - grounding is
     enforced by the system prompt and tools, not by sampling.
+
+    ``stream_thoughts`` turns on Gemini's ``include_thoughts``: 2.5 models think by default
+    but omit the thought TEXT from the response, so this is what surfaces it - as streamable
+    ``thinking`` content blocks. The agent loop enables it to feed the SSE reasoning stream
+    (see :func:`src.streaming.stream_agent_run`); the classifier leaves it off, because a
+    structured router has no reasoning to show and shouldn't pay to return it. When off, no
+    thinking config is sent, so the call is byte-identical to a plain chat model.
     """
-    return ChatGoogleGenerativeAI(
-        model=model_id,
-        vertexai=True,
-        project=GCP_PROJECT,
-        location=GCP_REGION,
-        temperature=0.0,
-    )
+    kwargs: dict[str, object] = {
+        "model": model_id,
+        "vertexai": True,
+        "project": GCP_PROJECT,
+        "location": GCP_REGION,
+        "temperature": 0.0,
+    }
+    if stream_thoughts:
+        kwargs["include_thoughts"] = True
+    return ChatGoogleGenerativeAI(**kwargs)
