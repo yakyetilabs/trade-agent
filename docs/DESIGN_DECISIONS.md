@@ -178,7 +178,11 @@ _(See [`backend/src/embeddings.py`](https://github.com/yakyetilabs/trade-agent/b
 
 ---
 
-## 9. Frontend and Backend Wiring: One Origin via a Hosting Rewrite
+## 9. Frontend and Backend Wiring: One Origin, then a Split-Origin Pivot for Unbuffered SSE
+
+_Amended 2026-07-03: this decision was later revised._
+_Production pivoted from the same-origin Hosting rewrite to a split-origin `api.` subdomain, because a CDN on the rewrite path buffered the Server-Sent Events stream._
+_The original same-origin reasoning below still holds for a request/response API and for local dev; see **The split-origin pivot** at the end of this section for what changed and why._
 
 The frontend (React on Firebase Hosting) and the backend (FastAPI on Cloud Run) sit inside the same Firebase project, so how the browser reaches the API is itself a design choice rather than a default.
 The "buy the commodity, build the moat" posture (§3) extends to the wiring: it should ride the platform's native path, not hand-built glue.
@@ -213,7 +217,16 @@ This pattern is current and supported as of June 2026 - Firebase App Hosting is 
 Routing through Hosting places a CDN in front of the API, which is harmless for the SPA's static assets and a hazard for its authenticated responses.
 Every vendor-scoped response must carry `Cache-Control: private, no-store` so the edge never caches one analyst's data and replays it to another; the same-origin win would otherwise smuggle a cross-tenant leak back in at the cache layer.
 That header is a response-layer requirement rather than an optional tuning knob, and it is the one new obligation this wiring choice creates.
-_(Planned, not yet built: the `firebase.json` rewrite and the response `Cache-Control` header are owned by the frontend and deploy phases. See [`docs/GCP_SETUP.md`](https://github.com/yakyetilabs/trade-agent/blob/main/docs/GCP_SETUP.md) §9.)_
+**The split-origin pivot (2026-07-03).**
+The same-origin rewrite was correct for a request/response JSON API, but the agent later grew a Server-Sent Events reasoning stream (`thinking_delta` / `text_delta`), and streaming is where the "one CDN in front of everything" win turns into a liability.
+A CDN buffers responses, so on the Hosting rewrite path the browser receives the stream in coarse chunks instead of frame by frame - which defeats the point of streaming.
+The fix is to give the streaming API a path that bypasses the CDN: a dedicated `api.trade-agent.samir.codes` subdomain, wired as a Cloudflare grey-cloud (DNS-only) record to the Cloud Run service, so no proxy sits between the browser and the origin and the SSE frames arrive unbuffered.
+The frontend stays on `trade-agent.samir.codes` (Cloudflare-proxied, which is the right posture for its static assets).
+The cost of the split is that the browser now makes a genuine cross-origin call, so CORS returns to the production path.
+That is a deliberate, cheap trade: the backend re-enables it as a middleware allowlist keyed on `PROD_FRONTEND_ORIGINS` (`resolve_cors_origins` -> `CORSMiddleware`), one extra source of truth beside the §5 identity allowlist, and still **not** a load balancer or IAP (the §5 rejection stands).
+The `Cache-Control: private, no-store` obligation from the caching note above still holds, because the frontend origin is still CDN-fronted and it is cheap insurance regardless.
+The frontend no longer calls a relative `/api`: the production API base URL is baked into the build via `frontend/.env.production` (`VITE_API_BASE_URL`), while local dev keeps the same-origin Vite proxy.
+See [`docs/GCP_SETUP.md`](https://github.com/yakyetilabs/trade-agent/blob/main/docs/GCP_SETUP.md) §9 for the operational setup.
 
 ---
 

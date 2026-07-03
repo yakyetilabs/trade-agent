@@ -130,6 +130,7 @@ def test_agent_trace_round_trips_through_json_dump() -> None:
             ),
         ),
         draft_response="Draft text.",
+        draft_actionable=True,
         disposition=TraceDisposition.DRAFT,
         model="gemini-2.5-flash",
     )
@@ -139,6 +140,7 @@ def test_agent_trace_round_trips_through_json_dump() -> None:
     assert dumped["classification"]["intent"] == "manifest_flag_resolution"
     assert isinstance(dumped["tool_calls"], list)
     assert dumped["tool_calls"][0]["tool_name"] == "lookup_shipment_manifest"
+    assert dumped["draft_actionable"] is True
     # And it validates back into an equal model.
     assert AgentTrace.model_validate(dumped) == trace
 
@@ -153,3 +155,47 @@ def test_agent_trace_rejects_malformed_vendor_id() -> None:
             disposition=TraceDisposition.ESCALATED,
             model="gemini-2.5-flash",
         )
+
+
+def test_agent_trace_thinking_content_defaults_none() -> None:
+    """thinking_content is optional — None on the synchronous and pre-model-guard paths."""
+    trace = AgentTrace(
+        trace_id="tr-think",
+        timestamp="2026-06-25T00:00:00Z",
+        vendor_id="V-003",
+        user_inquiry="Why is my shipment held?",
+        disposition=TraceDisposition.DRAFT,
+        model="gemini-2.5-flash",
+    )
+    assert trace.thinking_content is None
+
+
+def test_agent_trace_draft_actionable_defaults_false() -> None:
+    """draft_actionable defaults False - the safe direction, so an unset or legacy trace
+    reads as non-releasable rather than offering Approve on an unknown result."""
+    trace = AgentTrace(
+        trace_id="tr-act",
+        timestamp="2026-06-25T00:00:00Z",
+        vendor_id="V-003",
+        user_inquiry="Why is my shipment held?",
+        disposition=TraceDisposition.DRAFT,
+        model="gemini-2.5-flash",
+    )
+    assert trace.draft_actionable is False
+
+
+def test_agent_trace_persists_thinking_content_through_json_dump() -> None:
+    """The streamed reasoning round-trips through the Firestore JSON dump."""
+    trace = AgentTrace(
+        trace_id="tr-think",
+        timestamp="2026-06-25T00:00:00Z",
+        vendor_id="V-003",
+        user_inquiry="Why is my shipment held?",
+        draft_response="Draft text.",
+        thinking_content="Reviewing S-1001 against HTS 8517.13.0000.",
+        disposition=TraceDisposition.DRAFT,
+        model="gemini-2.5-flash",
+    )
+    dumped = trace.model_dump(mode="json")
+    assert dumped["thinking_content"] == "Reviewing S-1001 against HTS 8517.13.0000."
+    assert AgentTrace.model_validate(dumped) == trace

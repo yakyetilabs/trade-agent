@@ -1,12 +1,14 @@
 /**
- * Layer-1 SSE client for the agent pipeline: POST /api/inquiry/stream, streamed as it runs.
+ * SSE client for the agent pipeline: POST /api/inquiry/stream, streamed as it runs.
  *
  * The browser consumes the stream with `fetch` + a `ReadableStream` reader (NOT `EventSource`) so the
  * Firebase Bearer token can ride in the Authorization header (docs/FRONTEND_PLAN.md "Transport
  * notes"). Frames are `event: <name>\ndata: <json>\n\n` blocks; `parseSseBlock` turns one block into a
  * `StreamEvent` (the `type` tag = the SSE event name; the JSON never carries the name), and
- * `streamInquiry` buffers raw bytes into complete blocks and yields them. Same-origin `/api`, same as
- * the JSON client - Vite proxy in dev, Hosting rewrite in prod.
+ * `streamInquiry` buffers raw bytes into complete blocks and yields them. The vocabulary is the
+ * Layer-1 pipeline-progress events plus the Layer-2 model-output deltas (`thinking_delta` /
+ * `text_delta`). Same-origin `/api`, same as the JSON client - Vite proxy in dev, Hosting rewrite in
+ * prod.
  */
 import { config } from "../config";
 import { type TokenProvider, toApiError } from "./apiClient";
@@ -17,6 +19,8 @@ const KNOWN_EVENTS: ReadonlySet<string> = new Set([
   "run_started",
   "stage_started",
   "stage_completed",
+  "thinking_delta",
+  "text_delta",
   "guard_triggered",
   "done",
   "error",

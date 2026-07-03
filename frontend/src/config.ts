@@ -17,8 +17,10 @@ interface FirebaseConfig {
 
 interface AppConfig {
   readonly firebase: FirebaseConfig;
-  /** API base path. Same-origin by default ("/api"): Vite proxies it in dev, the Firebase Hosting
-   *  rewrite serves it in prod, so the browser never makes a cross-origin call. */
+  /** API base URL. Dev: the same-origin "/api" default, which the Vite proxy forwards to the local
+   *  backend. Prod: the split-origin api. subdomain, pinned via VITE_API_BASE_URL in
+   *  .env.production - a cross-origin call to Cloud Run that the backend CORS-allowlists, kept
+   *  DNS-only (no CDN) so the SSE reasoning stream arrives unbuffered. */
   readonly apiBaseUrl: string;
   /** Vite mode ("development" | "production" | "test"). */
   readonly mode: string;

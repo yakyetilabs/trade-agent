@@ -1,4 +1,4 @@
-"""Unit tests for the Layer-1 streaming runner and the SSE event protocol.
+"""Unit tests for the streaming runner and the SSE event protocol.
 
 Hermetic like ``test_agent.py``: ``build_agent`` is replaced with a fake whose
 ``astream_events`` yields a scripted event stream and appends tool calls through the same
@@ -10,14 +10,16 @@ run for real. Tests drive the async generator with ``asyncio.run`` (no async plu
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 from dataclasses import dataclass
 from typing import cast
 
 import pytest
-from langchain_core.language_models import LanguageModelInput
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.language_models import BaseChatModel, LanguageModelInput
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, BaseMessageChunk
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable
 
 from src import agent, repository, streaming
@@ -39,6 +41,9 @@ from src.streaming import (
     StageCompletedEvent,
     StageStartedEvent,
     StreamEvent,
+    TextDeltaEvent,
+    ThinkingDeltaEvent,
+    _stream_deltas,
     sse_format,
     stream_agent_run,
 )
@@ -62,6 +67,18 @@ class _ToolCallSpec:
     output: dict[str, object]
 
 
+@dataclass
+class _ModelStreamSpec:
+    """One simulated ``on_chat_model_stream`` chunk: its content plus the langgraph node it
+    came from. ``node="model"`` is the agent's own model (surfaced as deltas); any other node
+    is a tool-internal model call (e.g. the classifier's structured output) that must NOT
+    leak. Content mirrors ``langchain-google-genai``: a plain string or a list of
+    ``{"type": "thinking"|"text", ...}`` blocks."""
+
+    content: str | list[str | dict[str, object]]
+    node: str = "model"
+
+
 class _FakeStreamingAgent:
     """Stand-in for the compiled graph under astream_events; records how it was invoked.
 
@@ -78,11 +95,13 @@ class _FakeStreamingAgent:
         messages: Sequence[BaseMessage] = (),
         nested_messages: Sequence[BaseMessage] | None = None,
         error: Exception | None = None,
+        model_chunks: Sequence[_ModelStreamSpec] = (),
     ) -> None:
         self._calls = calls
         self._messages = messages
         self._nested_messages = nested_messages
         self._error = error
+        self._model_chunks = model_chunks
         self.invoked_with: dict[str, object] | None = None
 
     async def astream_events(
@@ -101,6 +120,17 @@ class _FakeStreamingAgent:
         }
         if self._error is not None:
             raise self._error
+        # The model's reasoning/answer stream (emitted up front, mirroring the loop reasoning
+        # before it calls tools). Each carries langgraph_node metadata so the runner can keep
+        # the agent's own model ("model") and drop a tool-internal call (anything else).
+        for chunk_spec in self._model_chunks:
+            yield {
+                "event": "on_chat_model_stream",
+                "name": "FakeModel",
+                "parent_ids": ["root"],
+                "metadata": {"langgraph_node": chunk_spec.node},
+                "data": {"chunk": AIMessageChunk(content=chunk_spec.content)},
+            }
         for spec in self._calls:
             yield {"event": "on_tool_start", "name": spec.name, "parent_ids": ["root"], "data": {}}
             with record_tool_call(spec.name, spec.input) as out:
@@ -263,6 +293,7 @@ def test_normal_run_streams_stage_pairs_then_done(monkeypatch: pytest.MonkeyPatc
     assert done.result.disposition is TraceDisposition.DRAFT
     assert done.result.draft_response is not None
     assert done.result.draft_response.startswith("Shipment S-1001 is held")
+    assert done.result.draft_actionable is True  # releasable draft flows through the done event
     assert done.result.tool_call_count == 4
     # Billable token split threaded through the root on_chain_end capture (prompt+output==total).
     assert (done.result.prompt_tokens, done.result.output_tokens, done.result.total_tokens) == (
@@ -358,6 +389,129 @@ def test_only_root_chain_end_counts_tokens(monkeypatch: pytest.MonkeyPatch) -> N
     assert done.result.prompt_tokens == 100
 
 
+# --- Model-output deltas (Layer 2: thinking_delta / text_delta) -----------------
+def test_stream_deltas_maps_every_content_shape() -> None:
+    """The pure chunk-content splitter, over the shapes langchain-google-genai emits."""
+    # A plain string chunk is visible answer text.
+    assert list(_stream_deltas("hello")) == [("text", "hello")]
+    # Empty fragments are dropped (tool-call turns stream empty content).
+    assert list(_stream_deltas("")) == []
+    # A block list keeps thinking vs text distinct and in order.
+    assert list(
+        _stream_deltas(
+            [
+                {"type": "thinking", "thinking": "weigh the manifest"},
+                {"type": "text", "text": "here is the answer"},
+            ]
+        )
+    ) == [("thinking", "weigh the manifest"), ("text", "here is the answer")]
+    # Empty block fragments are dropped too.
+    assert list(_stream_deltas([{"type": "thinking", "thinking": ""}])) == []
+    # A bare string element inside a list is visible text.
+    assert list(_stream_deltas(["visible"])) == [("text", "visible")]
+    # Unknown shapes / block types are ignored, never raised on.
+    assert list(_stream_deltas(None)) == []
+    assert list(_stream_deltas([{"type": "image", "url": "x"}])) == []
+
+
+def test_model_stream_maps_deltas_and_excludes_tool_node(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agent-model chunks become thinking/text deltas; a tool-internal model call
+    (langgraph_node != "model") is excluded, so its structured-output JSON never leaks."""
+    _vendor_exists(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    _capture_traces(monkeypatch)
+    fake = _FakeStreamingAgent(
+        calls=[_classify_spec(), _draft_spec("Grounded draft.")],
+        model_chunks=[
+            _ModelStreamSpec([{"type": "thinking", "thinking": "Reviewing "}]),
+            _ModelStreamSpec([{"type": "thinking", "thinking": "the manifest."}]),
+            _ModelStreamSpec(""),  # a tool-call turn: empty text, no delta
+            _ModelStreamSpec([{"type": "text", "text": "All set."}]),
+            _ModelStreamSpec('{"intent":"tariff_lookup"}', node="tools"),  # excluded
+            _ModelStreamSpec("Plain answer."),  # string content -> text delta
+        ],
+        messages=[
+            AIMessage(
+                content="done",
+                usage_metadata={"input_tokens": 10, "output_tokens": 4, "total_tokens": 14},
+            )
+        ],
+    )
+    _install_agent(monkeypatch, fake)
+
+    events = _drain("V-001", "Why is my shipment held?")
+
+    thinking = [e.text for e in events if isinstance(e, ThinkingDeltaEvent)]
+    text = [e.text for e in events if isinstance(e, TextDeltaEvent)]
+    assert thinking == ["Reviewing ", "the manifest."]
+    assert text == ["All set.", "Plain answer."]
+    # The tool-node structured-output JSON was dropped, not surfaced as a text delta.
+    assert all("intent" not in fragment for fragment in text)
+    # The deltas coexist with the normal terminal event.
+    assert isinstance(events[-1], DoneEvent)
+
+
+def test_thinking_deltas_accumulate_into_persisted_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The streamed reasoning is joined and persisted as ``trace.thinking_content``; visible
+    text and the tool-internal model call (node != "model") never enter the reasoning record,
+    and the draft stays authoritative from the tool."""
+    _vendor_exists(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    captured = _capture_traces(monkeypatch)
+    fake = _FakeStreamingAgent(
+        calls=[_classify_spec(), _draft_spec("Grounded draft.")],
+        model_chunks=[
+            _ModelStreamSpec([{"type": "thinking", "thinking": "Reviewing "}]),
+            _ModelStreamSpec([{"type": "thinking", "thinking": "shipment S-1001."}]),
+            _ModelStreamSpec([{"type": "text", "text": "All set."}]),  # visible answer
+            _ModelStreamSpec('{"intent":"tariff_lookup"}', node="tools"),  # excluded
+        ],
+        messages=[
+            AIMessage(
+                content="done",
+                usage_metadata={"input_tokens": 10, "output_tokens": 4, "total_tokens": 14},
+            )
+        ],
+    )
+    _install_agent(monkeypatch, fake)
+
+    _drain("V-001", "Why is S-1001 held?")
+
+    assert len(captured) == 1
+    trace = captured[0]
+    assert isinstance(trace, AgentTrace)
+    # The two reasoning fragments join verbatim; the visible text and the tool-node JSON are
+    # both absent from the reasoning record.
+    assert trace.thinking_content == "Reviewing shipment S-1001."
+    assert trace.draft_response == "Grounded draft."
+
+
+def test_run_without_thinking_persists_none_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A run that streams only visible text (no ``thinking`` blocks) persists
+    ``thinking_content`` as ``None`` - not "" - matching the synchronous path's None."""
+    _vendor_exists(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    captured = _capture_traces(monkeypatch)
+    fake = _FakeStreamingAgent(
+        calls=[_classify_spec(), _draft_spec("Grounded draft.")],
+        model_chunks=[_ModelStreamSpec("Plain answer, no thoughts.")],
+        messages=[
+            AIMessage(
+                content="done",
+                usage_metadata={"input_tokens": 10, "output_tokens": 4, "total_tokens": 14},
+            )
+        ],
+    )
+    _install_agent(monkeypatch, fake)
+
+    _drain("V-001", "What duty applies?")
+
+    assert len(captured) == 1
+    trace = captured[0]
+    assert isinstance(trace, AgentTrace)
+    assert trace.thinking_content is None
+
+
 # --- Escalation guard (terminal pipeline, still audited + done) -----------------
 def test_escalation_streams_guard_then_done(monkeypatch: pytest.MonkeyPatch) -> None:
     _explode_if_built(monkeypatch)
@@ -406,6 +560,7 @@ def test_cross_vendor_streams_guard_then_done(monkeypatch: pytest.MonkeyPatch) -
     assert done.result.classification is not None
     assert done.result.classification.intent is InquiryIntent.CROSS_VENDOR_REFUSAL
     assert done.result.draft_response == agent._CROSS_VENDOR_REFUSAL_DRAFT
+    assert done.result.draft_actionable is False  # a refusal is never releasable
     assert len(captured) == 1
 
 
@@ -495,8 +650,9 @@ def test_real_graph_streams_through_astream_events(monkeypatch: pytest.MonkeyPat
         usage_metadata={"input_tokens": 40, "output_tokens": 10, "total_tokens": 50},
     )
     fake_model = _BindableFake(responses=[draft_turn, final_turn])
-    # build_agent is the REAL one (not patched); only the provider seam is swapped.
-    monkeypatch.setattr(agent, "build_chat_model", lambda _model_id: fake_model)
+    # build_agent is the REAL one (not patched); only the provider seam is swapped. It passes
+    # stream_thoughts=True, so the fake seam must accept the keyword.
+    monkeypatch.setattr(agent, "build_chat_model", lambda _model_id, **_kwargs: fake_model)
 
     events = _drain("V-001", "Draft a clearance response for S-1001.")
 
@@ -518,6 +674,115 @@ def test_real_graph_streams_through_astream_events(monkeypatch: pytest.MonkeyPat
     assert [c.tool_name for c in trace.tool_calls] == ["draft_clearance_response"]
 
 
+class _StreamingTurnsModel(BaseChatModel):
+    """A real streaming chat model: each invocation streams one scripted turn's chunks.
+
+    Implements ``_stream`` so ``astream_events`` emits genuine ``on_chat_model_stream``
+    events under create_agent's model node - the real-graph proof that the loop's reasoning
+    and answer chunks surface as ``thinking_delta`` / ``text_delta``. The hermetic tests
+    script the ``langgraph_node`` metadata; this locks that create_agent actually tags its
+    own model call ``"model"`` (verified against the live graph at build time).
+    """
+
+    turns: list[list[AIMessageChunk]]
+    cursor: int = 0
+
+    @property
+    def _llm_type(self) -> str:
+        return "streaming-turns-fake"
+
+    def _next_turn(self) -> list[AIMessageChunk]:
+        turn = self.turns[self.cursor]
+        self.cursor += 1
+        return turn
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> Iterator[ChatGenerationChunk]:
+        for chunk in self._next_turn():
+            yield ChatGenerationChunk(message=chunk)
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        # astream_events uses _stream; _generate satisfies the ABC by merging the same chunks.
+        turn = self._next_turn()
+        merged: BaseMessageChunk = turn[0]
+        for chunk in turn[1:]:
+            merged = merged + chunk
+        return ChatResult(generations=[ChatGeneration(message=merged)])
+
+    def bind_tools(
+        self, tools: object, **kwargs: object
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        # Tool calls are scripted directly onto the chunks, so binding is a no-op; the cast
+        # matches BaseChatModel.bind_tools' AIMessage-output contract.
+        return cast("Runnable[LanguageModelInput, AIMessage]", self)
+
+
+def test_real_graph_streams_thinking_and_text_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drive stream_agent_run through the REAL create_agent graph with a streaming model.
+
+    Locks the assumption the hermetic tests script rather than prove: create_agent tags its
+    own model call ``langgraph_node == "model"``, so the loop's thinking + answer chunks
+    actually surface as ``thinking_delta`` / ``text_delta``. Only the chat model is faked (a
+    real ``_stream``); the tool exercised is the dependency-free draft tool. The draft still
+    rides the tool + ``done`` result - it is never reassembled from the text deltas.
+    """
+    _vendor_exists(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    captured = _capture_traces(monkeypatch)
+
+    reason_chunk = AIMessageChunk(
+        content=[{"type": "thinking", "thinking": "Reviewing shipment S-1001."}]
+    )
+    call_chunk = AIMessageChunk(
+        content="",
+        tool_calls=[
+            {
+                "name": "draft_clearance_response",
+                "args": {
+                    "response_text": "Grounded draft citing HTS 8517.13.0000.",
+                    "cited_hts_codes": ["8517.13.0000"],
+                    "cited_shipment_ids": ["S-1001"],
+                    "confidence": 0.8,
+                },
+                "id": "d1",
+            }
+        ],
+    )
+    answer_chunk = AIMessageChunk(content="Draft ready for your review.")
+    fake_model = _StreamingTurnsModel(turns=[[reason_chunk, call_chunk], [answer_chunk]])
+    monkeypatch.setattr(agent, "build_chat_model", lambda _model_id, **_kwargs: fake_model)
+
+    events = _drain("V-001", "Draft a clearance response for S-1001.")
+
+    thinking = "".join(e.text for e in events if isinstance(e, ThinkingDeltaEvent))
+    text = "".join(e.text for e in events if isinstance(e, TextDeltaEvent))
+    assert "Reviewing shipment S-1001." in thinking
+    assert "Draft ready for your review." in text
+    # A real draft-stage pair still animates, and the authoritative draft rides the tool.
+    assert ("StageCompletedEvent", "draft") in _kinds(events)
+    done = events[-1]
+    assert isinstance(done, DoneEvent)
+    assert done.result.draft_response == "Grounded draft citing HTS 8517.13.0000."
+    assert done.result.tool_names == ["draft_clearance_response"]
+    # The reasoning is accumulated through the REAL graph and persisted on the single trace.
+    assert len(captured) == 1
+    persisted = captured[0]
+    assert isinstance(persisted, AgentTrace)
+    assert persisted.thinking_content is not None
+    assert "Reviewing shipment S-1001." in persisted.thinking_content
+
+
 # --- SSE serialization (the wire protocol) --------------------------------------
 def _minimal_result() -> AgentResult:
     return AgentResult(
@@ -536,9 +801,24 @@ def test_event_names_match_the_contract() -> None:
     assert RunStartedEvent.event_name == "run_started"
     assert StageStartedEvent.event_name == "stage_started"
     assert StageCompletedEvent.event_name == "stage_completed"
+    assert ThinkingDeltaEvent.event_name == "thinking_delta"
+    assert TextDeltaEvent.event_name == "text_delta"
     assert GuardTriggeredEvent.event_name == "guard_triggered"
     assert DoneEvent.event_name == "done"
     assert ErrorEvent.event_name == "error"
+
+
+def test_sse_format_thinking_and_text_deltas() -> None:
+    thinking_block = sse_format(ThinkingDeltaEvent(text="weighing the manifest"))
+    assert thinking_block.startswith("event: thinking_delta\n")
+    assert thinking_block.endswith("\n\n")
+    thinking_line = next(line for line in thinking_block.splitlines() if line.startswith("data: "))
+    assert json.loads(thinking_line.removeprefix("data: ")) == {"text": "weighing the manifest"}
+
+    text_block = sse_format(TextDeltaEvent(text="Draft ready."))
+    assert text_block.startswith("event: text_delta\n")
+    text_line = next(line for line in text_block.splitlines() if line.startswith("data: "))
+    assert json.loads(text_line.removeprefix("data: ")) == {"text": "Draft ready."}
 
 
 def test_sse_format_emits_event_line_and_pure_data_payload() -> None:

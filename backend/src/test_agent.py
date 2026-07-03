@@ -144,6 +144,7 @@ def test_escalation_short_circuits_before_the_model(monkeypatch: pytest.MonkeyPa
     assert result.escalation_reason == "contraband"
     assert result.classification is None
     assert result.draft_response is None
+    assert result.draft_actionable is False
     assert result.tool_call_count == 0
     assert len(captured) == 1  # exactly one audit trace, written without a model call
 
@@ -160,6 +161,8 @@ def test_cross_vendor_vendor_reference_is_refused(monkeypatch: pytest.MonkeyPatc
     assert result.classification is not None
     assert result.classification.intent is InquiryIntent.CROSS_VENDOR_REFUSAL
     assert result.draft_response == agent._CROSS_VENDOR_REFUSAL_DRAFT
+    # A refusal carries draft text and DRAFT disposition, but is not releasable.
+    assert result.draft_actionable is False
     assert result.tool_call_count == 0
 
 
@@ -228,6 +231,8 @@ def test_normal_run_extracts_classification_draft_and_tokens(
     assert result.classification.intent is InquiryIntent.TARIFF_LOOKUP
     assert result.draft_response is not None
     assert result.draft_response.startswith("Shipment S-1001 is held")
+    # A grounded draft tied to a found shipment is releasable - Approve is offered.
+    assert result.draft_actionable is True
     assert result.tool_call_count == 4
     # Billable token split surfaced on the result (cost axis). No reasoning detail on
     # this message, so thoughts is 0; prompt + output == total.
@@ -300,9 +305,59 @@ def test_token_split_folds_thoughts_and_sums_across_messages(
     assert result.thoughts_tokens == 35  # 30 + 5
     assert result.total_tokens == 360  # 290 + 70 == prompt + output
     assert result.prompt_tokens + result.output_tokens == result.total_tokens
+    # A tariff-only run never looks up a shipment, so "no shipment found" does not apply -
+    # the informational draft stays releasable.
+    assert result.draft_actionable is True
     assert len(captured) == 1
     assert captured[0].thoughts_tokens == 35
     assert captured[0].output_tokens == 110
+
+
+# --- Actionability: a drafted "no shipments found" note is not releasable ---------
+def test_no_matching_shipments_draft_is_not_actionable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lookup that finds nothing yields a drafted "no shipments found" note a human cannot
+    Approve & release - there is no shipment to clear. The draft is real (not the fallback)
+    and audited, but ``draft_actionable`` is False so the UI hides Approve.
+    """
+    _vendor_exists(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    captured = _capture_traces(monkeypatch)
+
+    fake = _FakeAgent(
+        calls=[
+            _classify_spec(intent="manifest_flag_resolution"),
+            _ToolCallSpec(
+                name="lookup_shipment_manifest",
+                input={"shipment_id": "S-9999"},
+                output={"count": 0, "scope_violation": False, "shipment_ids": []},
+            ),
+            _ToolCallSpec(
+                name="draft_clearance_response",
+                input={
+                    "response_text": "No shipments matching S-9999 were found for your vendor.",
+                    "cited_hts_codes": [],
+                    "cited_shipment_ids": [],
+                    "confidence": 0.9,
+                },
+                output={"trace_id": "tr-x", "status": "drafted"},
+            ),
+        ],
+        messages=[AIMessage(content="done")],
+    )
+    _install_agent(monkeypatch, fake)
+
+    result = agent.run_agent("V-001", "Why is shipment S-9999 held?")
+
+    assert result.disposition is TraceDisposition.DRAFT
+    assert result.draft_response is not None
+    assert result.draft_response.startswith("No shipments matching S-9999")
+    assert result.draft_response != agent._FALLBACK_DRAFT  # a genuine draft, not the fallback
+    assert result.draft_actionable is False  # nothing to release -> Approve is gated
+    assert result.tool_call_count == 3
+    assert len(captured) == 1
+    assert captured[0].draft_actionable is False  # persisted on the audit trace too
 
 
 # --- (6) No-draft fallback ------------------------------------------------------
@@ -332,6 +387,7 @@ def test_loop_without_draft_falls_back_to_iteration_cap(
     assert result.draft_response == agent._FALLBACK_DRAFT
     assert result.classification is not None
     assert result.classification.intent is InquiryIntent.ITERATION_CAP_EXCEEDED
+    assert result.draft_actionable is False  # a no-draft fallback is not releasable
     assert result.tool_call_count == 2  # the partial tool calls are still audited
     assert len(captured) == 1
 
@@ -351,6 +407,7 @@ def test_invoke_failure_degrades_to_fallback_draft(monkeypatch: pytest.MonkeyPat
     assert result.classification is not None
     assert result.classification.intent is InquiryIntent.ITERATION_CAP_EXCEEDED
     assert "RuntimeError" in result.classification.reasoning
+    assert result.draft_actionable is False  # a degraded fallback is not releasable
     assert result.tool_call_count == 0
     assert len(captured) == 1  # a failed run still produces exactly one audit trace
 
@@ -369,8 +426,9 @@ def test_build_agent_binds_vendor_context_and_the_four_tools(
     """
     fake_model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
     # Patch the provider seam so the real build_agent graph is constructed with a
-    # credential-free fake chat model (no Vertex SDK init, no network).
-    monkeypatch.setattr(agent, "build_chat_model", lambda _model_id: fake_model)
+    # credential-free fake chat model (no Vertex SDK init, no network). build_agent passes
+    # stream_thoughts=True, so the fake seam must accept the keyword.
+    monkeypatch.setattr(agent, "build_chat_model", lambda _model_id, **_kwargs: fake_model)
 
     compiled = agent.build_agent(agent.VERTEX_PRIMARY_MODEL)
 

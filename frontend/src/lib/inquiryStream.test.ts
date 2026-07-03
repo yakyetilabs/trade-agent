@@ -49,6 +49,17 @@ describe("parseSseBlock", () => {
     });
   });
 
+  it("parses the Layer-2 thinking_delta and text_delta blocks", () => {
+    expect(parseSseBlock('event: thinking_delta\ndata: {"text":"Let me check."}')).toEqual({
+      type: "thinking_delta",
+      text: "Let me check.",
+    });
+    expect(parseSseBlock('event: text_delta\ndata: {"text":"The shipment is held."}')).toEqual({
+      type: "text_delta",
+      text: "The shipment is held.",
+    });
+  });
+
   it("ignores comment/heartbeat and unknown-event blocks", () => {
     expect(parseSseBlock(": keep-alive")).toBeNull();
     expect(parseSseBlock('event: bogus\ndata: {"x":1}')).toBeNull();

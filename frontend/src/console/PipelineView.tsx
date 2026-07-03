@@ -1,3 +1,5 @@
+import { useId, useState } from "react";
+
 import type { PipelineStage } from "../types/api";
 import { formatConfidence, humanizeIntent } from "./format";
 import type { GuardOutcome, RunStages, StageStatus } from "./useInquiryRun";
@@ -138,38 +140,161 @@ function StageNode({
   );
 }
 
+const STAGE_DOT: Record<StageStatus, string> = {
+  pending: "bg-fg-subtle/40",
+  active: "bg-accent",
+  complete: "bg-success",
+  skipped: "bg-fg-subtle/40",
+};
+
+/** A chevron that rotates to point down when the disclosure opens (matches ReasoningPanel). */
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className={`flex-none text-fg-subtle transition-transform duration-150 ease-out-soft ${open ? "rotate-90" : ""}`}
+    >
+      <path
+        d="m9 6 6 6-6 6"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** The deterministic-guard banner. The model never ran, so it leads the pipeline card in both the
+ *  live and the collapsed layouts. */
+function GuardBanner({ guard }: { guard: GuardOutcome }) {
+  return (
+    <div className="mt-3 rounded-lg border border-danger/40 bg-danger/10 p-4" role="status">
+      <p className="text-sm font-semibold text-danger">Routed to a human reviewer</p>
+      <p className="mt-1 text-xs leading-relaxed text-fg-muted">
+        Intercepted by the deterministic {GUARD_LABEL[guard.kind]} before the model ran - no tokens
+        were spent.
+      </p>
+      {guard.reason ? (
+        <p className="mt-2 border-l-2 border-danger/40 pl-2 text-xs italic text-fg-subtle">
+          {guard.reason}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** A terse one-line projection of the completed run for the collapsed header (intent + confidence,
+ *  shipment count, the exact HTS hit). Empty when a guard pre-empted the model (no stage summaries). */
+function condensedSummary(stages: RunStages): string {
+  const parts: string[] = [];
+
+  const classify = stages.classify.summary;
+  if (classify?.intent) {
+    parts.push(`${humanizeIntent(classify.intent)} · ${formatConfidence(classify.confidence)}`);
+  }
+
+  const lookup = stages.lookup.summary;
+  if (lookup && lookup.count != null) {
+    parts.push(`${lookup.count} shipment${lookup.count === 1 ? "" : "s"}`);
+  }
+
+  const firstCode = stages.retrieve.summary?.hts_codes?.[0];
+  if (firstCode) {
+    parts.push(stages.retrieve.summary?.exact_hit ? `${firstCode} exact` : firstCode);
+  }
+
+  return parts.join(" · ");
+}
+
 interface PipelineViewProps {
+  stages: RunStages;
+  guard: GuardOutcome | null;
+  /** Once the run settles, fold the four-node card into a click-to-expand summary. This keeps the
+   *  live animation as the hero while streaming, then stops the settled per-stage detail from
+   *  duplicating the /traces audit view (see the PipelineView docblock). */
+  collapsed?: boolean;
+}
+
+/**
+ * The collapsed pipeline shown once a run settles: a compact header (four status dots + a one-line
+ * result summary) folding the full four-node card into a disclosure that defaults closed. A fired
+ * guard still leads with its banner; the all-skipped stages tuck inside the disclosure.
+ */
+function CollapsedPipelineView({ stages, guard }: PipelineViewProps) {
+  const [open, setOpen] = useState(false);
+  const regionId = useId();
+  const summary = condensedSummary(stages);
+
+  return (
+    <div className="mt-6 rounded-xl border border-hairline bg-surface p-5">
+      {guard ? <GuardBanner guard={guard} /> : null}
+      <div className={guard ? "mt-4" : ""}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-controls={regionId}
+            className="flex items-center gap-2 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+          >
+            <Chevron open={open} />
+            <span className="text-sm font-medium text-fg-muted">Pipeline</span>
+          </button>
+          <span className="flex items-center gap-1.5">
+            {STAGE_ORDER.map((stage) => (
+              <span
+                key={stage}
+                title={`${STAGE_LABEL[stage]}: ${stages[stage].status}`}
+                aria-hidden="true"
+                className={`h-1.5 w-1.5 rounded-full ${STAGE_DOT[stages[stage].status]}`}
+              />
+            ))}
+          </span>
+          {summary ? <span className="text-xs text-fg-subtle">{summary}</span> : null}
+        </div>
+
+        {open ? (
+          <ol id={regionId} className="mt-4 flex flex-col gap-4 sm:flex-row sm:gap-3">
+            {STAGE_ORDER.map((stage, index) => (
+              <StageNode key={stage} stage={stage} index={index} stages={stages} />
+            ))}
+          </ol>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+interface FullPipelineViewProps {
   stages: RunStages;
   guard: GuardOutcome | null;
 }
 
 /**
- * The four-stage agent pipeline. Each node animates pending -> active (soft pulse) -> complete (with
- * its real summary), or reads "Not used" when the agent skipped that tool. When a deterministic
- * pre-model guard fires, a banner leads and the stages settle as skipped - the model never ran.
+ * The four-stage agent pipeline. While a run streams (`collapsed` false) each node animates
+ * pending -> active (soft pulse) -> complete with its real summary, or reads "Not used" when the
+ * agent skipped that tool, and a fired pre-model guard leads with a banner. Once the run settles,
+ * `collapsed` hands off to `CollapsedPipelineView` so the settled detail - already recorded in full
+ * by the /traces audit view - folds into a disclosure instead of duplicating that page.
  */
-export function PipelineView({ stages, guard }: PipelineViewProps) {
+export function PipelineView({ stages, guard, collapsed = false }: PipelineViewProps) {
+  if (collapsed) {
+    return <CollapsedPipelineView stages={stages} guard={guard} />;
+  }
+  return <FullPipelineView stages={stages} guard={guard} />;
+}
+
+function FullPipelineView({ stages, guard }: FullPipelineViewProps) {
   return (
     <div className="mt-6 rounded-xl border border-hairline bg-surface p-5">
       <h2 className="text-sm font-medium text-fg-muted">Pipeline</h2>
 
-      {guard ? (
-        <div
-          className="mt-3 rounded-lg border border-danger/40 bg-danger/10 p-4"
-          role="status"
-        >
-          <p className="text-sm font-semibold text-danger">Routed to a human reviewer</p>
-          <p className="mt-1 text-xs leading-relaxed text-fg-muted">
-            Intercepted by the deterministic {GUARD_LABEL[guard.kind]} before the model ran - no
-            tokens were spent.
-          </p>
-          {guard.reason ? (
-            <p className="mt-2 border-l-2 border-danger/40 pl-2 text-xs italic text-fg-subtle">
-              {guard.reason}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
+      {guard ? <GuardBanner guard={guard} /> : null}
 
       <ol className="mt-4 flex flex-col gap-4 sm:flex-row sm:gap-3">
         {STAGE_ORDER.map((stage, index) => (

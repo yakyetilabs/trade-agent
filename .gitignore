@@ -38,6 +38,9 @@ node_modules/
 # ...but DO ship the example templates referenced by the quickstart
 !.env.example
 !.env.local.example
+# ...and the frontend's production build config: non-secret (just the split-origin API base URL),
+# so it is committed for a reproducible prod build. Scoped to frontend/ so backend .env* stay ignored.
+!/frontend/.env.production
 *.pem
 *.key
 
@@ -48,4 +51,6 @@ node_modules/
 # Local agent/tooling config — kept local, never committed
 CLAUDE.md
 CLAUDE.local.md
+# Detailed session history moved off CLAUDE.local.md's auto-load path
+SESSION_ARCHIVE.local.md
 .claude/

@@ -4,18 +4,32 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light dark" />
     <meta
       name="description"
       content="trade-agent - AI-assisted US import-compliance console. Synthetic-data demo."
     />
     <title>trade-agent - Analyst Console</title>
-    <!-- Paint the page ink immediately so there is no white flash before the stylesheet loads. -->
-    <style>
-      html {
-        background-color: #0b0e15;
-      }
-    </style>
+    <!-- Resolve the theme before first paint so there is no flash: the stored choice, else the OS
+         preference, else dark. Stamps <html data-theme> and a matching background; the two base
+         colors mirror --color-ink for each theme in src/index.css. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("trade-agent-theme");
+          var theme =
+            stored === "light" || stored === "dark"
+              ? stored
+              : window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.backgroundColor = theme === "light" ? "#f4f1ea" : "#0b0e15";
+        } catch (e) {
+          /* localStorage/matchMedia unavailable - fall back to the default dark theme. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

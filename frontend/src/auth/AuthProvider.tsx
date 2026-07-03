@@ -32,6 +32,13 @@ function toSignInMessage(err: unknown): string | null {
         return "Your browser blocked the sign-in popup. Allow popups for this site and try again.";
       case "auth/network-request-failed":
         return "Network error during sign-in. Check your connection and try again.";
+      case "auth/unauthorized-domain":
+        // Firebase rejects the OAuth flow before opening the popup when the serving origin isn't
+        // allowlisted - the exact failure on a new custom domain. Name the fix so it's actionable.
+        return (
+          "This domain isn't authorized for sign-in. Add it under Firebase Authentication -> " +
+          "Settings -> Authorized domains."
+        );
       default:
         return "Sign-in failed. Please try again.";
     }

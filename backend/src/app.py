@@ -10,7 +10,7 @@ behind two layers of the security boundary:
    query, list, audit, and dispose of records for vendors in their authorized scope:
 
 - ``POST /api/inquiry``                       run the agent (403 + audit log if out of scope)
-- ``POST /api/inquiry/stream``                run the agent with Layer-1 SSE progress (same gate)
+- ``POST /api/inquiry/stream``                run the agent, stream stages + reasoning (same gate)
 - ``GET  /api/vendors``                       the analyst's authorized vendors (the picker)
 - ``GET  /api/traces``                        recent audit traces, filtered to that scope
 - ``POST /api/traces/{trace_id}/disposition`` human approve/reject (scoped to the trace's vendor)
@@ -144,9 +144,10 @@ async def submit_inquiry_stream(
     request: InquiryRequest,
     analyst_email: str = Depends(verify_authorized_analyst),
 ) -> StreamingResponse:
-    """Layer-1 streaming variant of ``POST /api/inquiry``: the same auth and vendor-scope
-    gate, then a ``text/event-stream`` of pipeline progress that ends in a ``done`` event
-    carrying the ``AgentResult`` (see ``src/streaming.py`` for the event contract).
+    """Streaming variant of ``POST /api/inquiry``: the same auth and vendor-scope gate, then a
+    ``text/event-stream`` of pipeline-stage progress plus the model's streamed reasoning and
+    answer deltas, ending in a ``done`` event carrying the ``AgentResult`` (see
+    ``src/streaming.py`` for the event contract).
 
     The out-of-scope refusal is a plain 403 *before* the stream opens - identical to the
     non-streaming path and its scope-violation audit log. Once streaming, an unknown vendor

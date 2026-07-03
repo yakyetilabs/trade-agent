@@ -6,6 +6,7 @@ import { DispositionActions } from "./DispositionActions";
 import { DispositionBadge } from "./DispositionBadge";
 import type { GuardOutcome } from "./useInquiryRun";
 import { RunMetaStrip } from "./RunMetaStrip";
+import { useTypewriter } from "./useTypewriter";
 
 /**
  * The terminal panel for a finished run. A grounded draft settles into a document card with cited
@@ -15,13 +16,18 @@ import { RunMetaStrip } from "./RunMetaStrip";
  * the same metadata strip. Mount this keyed by `result.trace_id` so its state is fresh per run.
  */
 export function DraftPanel({ result, guard }: { result: AgentResult; guard: GuardOutcome | null }) {
+  const pristine = result.draft_response ?? "";
   const [disposition, setDisposition] = useState<TraceDisposition>(result.disposition);
   const [editing, setEditing] = useState(false);
-  const [draftText, setDraftText] = useState(result.draft_response ?? "");
+  const [draftText, setDraftText] = useState(pristine);
   const [copied, setCopied] = useState(false);
+  // Type the grounded draft out on first paint (this panel is keyed by trace id, so each run gets a
+  // fresh reveal). The reveal is presentational only - the authoritative text is `pristine`, still
+  // used verbatim for copy/edit/approve; we never reassemble the draft from stream deltas.
+  const revealed = useTypewriter(pristine, true);
 
-  const hasDraft = result.draft_response !== null && result.draft_response !== "";
-  const isEdited = draftText !== (result.draft_response ?? "");
+  const hasDraft = pristine !== "";
+  const isEdited = draftText !== pristine;
 
   async function copy() {
     try {
@@ -75,14 +81,18 @@ export function DraftPanel({ result, guard }: { result: AgentResult; guard: Guar
         </>
       ) : (
         <div className="mt-3">
-          <CitedDraft text={draftText} />
+          <CitedDraft text={isEdited ? draftText : revealed} />
           {isEdited ? <p className="mt-2 text-xs text-fg-subtle">Edited locally.</p> : null}
         </div>
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-hairline pt-4">
         {disposition === "draft" ? (
-          <DispositionActions traceId={result.trace_id} onDecided={setDisposition} />
+          <DispositionActions
+            traceId={result.trace_id}
+            actionable={result.draft_actionable}
+            onDecided={setDisposition}
+          />
         ) : null}
         <div className="ml-auto flex items-center gap-2">
           <button type="button" className="btn btn-ghost" onClick={() => setEditing((v) => !v)}>

@@ -7,6 +7,7 @@ const RESULT: AgentResult = {
   trace_id: "tr-1",
   disposition: "draft",
   draft_response: "Draft body.",
+  draft_actionable: true,
   classification: null,
   tool_call_count: 4,
   tool_names: ["classify_import_restriction"],
@@ -58,6 +59,41 @@ describe("inquiryRunReducer", () => {
     expect(state.stages.classify.status).toBe("complete");
     expect(state.stages.classify.summary).toEqual({ intent: "tariff_lookup", confidence: 0.9 });
     expect(state.stages.retrieve.status).toBe("active");
+  });
+
+  it("accumulates thinking_delta into reasoning and text_delta into answerText, in arrival order", () => {
+    const state = play([
+      { type: "run_started", trace_id: "tr-1", vendor_id: "V-001", model: "m" },
+      { type: "thinking_delta", text: "Class" },
+      { type: "thinking_delta", text: "ifying." },
+      { type: "text_delta", text: "The shipment " },
+      { type: "text_delta", text: "is held." },
+    ]);
+    expect(state.reasoning).toBe("Classifying.");
+    expect(state.answerText).toBe("The shipment is held.");
+  });
+
+  it("keeps accumulated reasoning and answerText through the done event", () => {
+    const state = play([
+      { type: "run_started", trace_id: "tr-1", vendor_id: "V-001", model: "m" },
+      { type: "thinking_delta", text: "thought" },
+      { type: "text_delta", text: "answer" },
+      { type: "done", result: RESULT },
+    ]);
+    expect(state.phase).toBe("done");
+    expect(state.reasoning).toBe("thought");
+    expect(state.answerText).toBe("answer");
+  });
+
+  it("submit clears reasoning and answerText from a prior run", () => {
+    const dirty = play([
+      { type: "run_started", trace_id: "tr-1", vendor_id: "V-001", model: "m" },
+      { type: "thinking_delta", text: "old" },
+      { type: "text_delta", text: "old" },
+    ]);
+    const state = inquiryRunReducer(dirty, { type: "submit" });
+    expect(state.reasoning).toBe("");
+    expect(state.answerText).toBe("");
   });
 
   it("on done, completes to done and marks never-started stages skipped", () => {

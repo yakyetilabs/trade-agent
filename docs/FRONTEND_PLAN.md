@@ -15,6 +15,21 @@ The React/Vite frontend is not started.
 Deployment is documented in `GCP_SETUP.md` §9 but not built; `Dockerfile` and `deploy.sh` do not exist yet.
 The definition of done for this phase is a live, deployed URL that runs the whole pipeline.
 
+## Status now (2026-07-03: this plan is executed)
+
+This plan has been built and shipped; the sections below are preserved as the historical build spec, with inline `UPDATE:` notes where reality diverged.
+The backend, the four-surface frontend, auth, the audit trail, and the eval suite are live on Cloud Run + Firebase Hosting.
+Two deltas are worth calling out, because they change specific claims made below:
+
+- **Layer 2 landed, in a different shape than planned.**
+  The model's reasoning (`thinking_delta`) and an advisory model-text stream (`text_delta`) now render live (the `ReasoningPanel` and `TextStream`), and the persisted reasoning is disclosed in the audit trace.
+  Crucially this did *not* touch the "exactly four tools" contract: the grounded draft still comes from the `draft_clearance_response` tool and stays authoritative, while the streamed reasoning and text are explicitly advisory.
+  The originally-scoped Layer 2 (making the draft itself the model's streamed text) remains parked.
+- **Production wiring pivoted from same-origin to split-origin.**
+  The Hosting `/api/**` rewrite was removed because its CDN buffered the SSE stream; the API is now reached cross-origin at the DNS-only `api.trade-agent.samir.codes` subdomain, which reintroduces CORS on the prod path (allowlisted in-app).
+  Local dev is unchanged (same-origin Vite proxy).
+  See `DESIGN_DECISIONS.md` §9.
+
 ## Locked decisions (do not re-litigate)
 
 - Visual brand is a dark "AgentOps console".
@@ -22,12 +37,14 @@ The definition of done for this phase is a live, deployed URL that runs the whol
 - The live-run experience is Layer 1 only.
   The four-stage pipeline animates from real Server-Sent Events as each tool executes.
   Token-by-token streaming of the draft text is parked as Future work.
+  UPDATE (2026-07-03): a Layer 2 landed after all, but as *advisory* streams - the model's reasoning (`thinking_delta`) and an advisory text stream (`text_delta`) render live alongside the pipeline, while the authoritative draft still comes from the tool. Draft-token streaming (the original Layer 2) stays parked.
 - The draft stays a tool.
   `draft_clearance_response` and the "exactly four tools" contract are unchanged.
   We do not restructure the draft into streamed assistant text in this phase.
 - Frontend and backend wiring is same-origin.
   Locally that is the Vite dev-server proxy; in production it is a Firebase Hosting `/api/**` rewrite.
   There is no CORS on the production path, and authenticated responses carry `Cache-Control: private, no-store`.
+  UPDATE (2026-07-03): production is now split-origin - the Hosting rewrite buffered SSE, so the API moved to the DNS-only `api.` subdomain and CORS is back on the prod path (allowlisted via `PROD_FRONTEND_ORIGINS`). Local dev stays same-origin. The `Cache-Control: private, no-store` requirement still holds. See `DESIGN_DECISIONS.md` §9.
 - Auth is one-click Google sign-in in production.
   Firebase authenticates; the in-memory allowlist authorizes server-side, so a non-allowlisted Google user gets a 403.
   The Email/Password scaffold is disabled once the frontend works.
@@ -117,6 +134,7 @@ Transport notes:
 - The browser consumes the stream with `fetch` plus a `ReadableStream` reader, not `EventSource`, so the Firebase Bearer token rides in the Authorization header.
 - The response carries `Cache-Control: no-store`.
 - In production the Hosting rewrite and the CDN must pass the stream through unbuffered; verify this in F5.
+  UPDATE (2026-07-03): they did not - the CDN buffered the stream, which is exactly why production pivoted to the DNS-only `api.` subdomain (see `DESIGN_DECISIONS.md` §9).
 
 ## Backend design (F0)
 
@@ -186,6 +204,7 @@ Transport notes:
 - Layer 2: token-by-token streaming of the draft text.
   This is gated on either Gemini's incremental function-call-argument streaming maturing (`streamFunctionCallArguments` with `partialArgs` and `willContinue`, currently Vertex-only and associated with Gemini 3 Pro Preview), or a model swap to Claude on Vertex.
   If pursued, the cleanest path is to make the final draft the model's streamed assistant text and to derive the citations by regex from the draft, which would touch the "exactly four tools" contract and so needs a conscious design update.
+  UPDATE (2026-07-03): a *reasoning* stream shipped instead (`thinking_delta` / `text_delta`, rendered advisory), which delivers the live-typing "wow" without touching the four-tools contract - so this draft-token variant is now lower priority than when it was written.
   Evidence: [function calling intro](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/tools/function-calling) and [vercel/ai #11126](https://github.com/vercel/ai/issues/11126).
 - A model swap to Claude (Haiku or Sonnet) on Vertex.
   This is cheap because the model is isolated behind `config.py` and `_build_agent`, and it could be the same change that unlocks Layer 2.

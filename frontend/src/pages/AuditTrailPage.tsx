@@ -32,7 +32,8 @@ export function AuditTrailPage() {
   const filtered = useMemo(() => filterTracesByDisposition(traces, filter), [traces, filter]);
 
   return (
-    <section>
+    // Owns its own scroll now that the shell is height-bounded and `main` drops its padding.
+    <section className="min-h-0 flex-1 overflow-y-auto py-8">
       <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-fg">Audit Trail</h1>

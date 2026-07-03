@@ -1,10 +1,11 @@
 /**
- * The Console's run-state machine: a pure reducer over the Layer-1 SSE event stream, plus the hook
- * that drives it.
+ * The Console's run-state machine: a pure reducer over the SSE event stream, plus the hook that
+ * drives it.
  *
  * The reducer folds the `StreamEvent` union (src/types/api.ts) into a view model the Console renders:
  * a phase (idle -> connecting -> streaming -> done | guarded | error), the four pipeline stages with
- * their live status and completed summaries, an optional guard outcome, and the terminal
+ * their live status and completed summaries, the accumulated Layer-2 model output (`reasoning` from
+ * `thinking_delta`, `answerText` from `text_delta`), an optional guard outcome, and the terminal
  * `AgentResult`. It is exported and framework-free so the transitions are unit-tested without any
  * network. `useInquiryRun` owns the `AbortController` and feeds `streamInquiry` events into it.
  */
@@ -48,6 +49,10 @@ export interface RunState {
   traceId: string | null;
   model: string | null;
   stages: RunStages;
+  /** Accumulated `thinking_delta` fragments - the model's streamed reasoning (advisory). */
+  reasoning: string;
+  /** Accumulated `text_delta` fragments - the model's streamed visible answer (advisory). */
+  answerText: string;
   guard: GuardOutcome | null;
   result: AgentResult | null;
   error: string | null;
@@ -74,6 +79,8 @@ function freshRun(phase: RunPhase): RunState {
     traceId: null,
     model: null,
     stages: freshStages(),
+    reasoning: "",
+    answerText: "",
     guard: null,
     result: null,
     error: null,
@@ -131,6 +138,10 @@ function applyEvent(state: RunState, event: StreamEvent): RunState {
       return { ...state, stages: withStageActive(state.stages, event.stage) };
     case "stage_completed":
       return { ...state, stages: withStageComplete(state.stages, event) };
+    case "thinking_delta":
+      return { ...state, reasoning: state.reasoning + event.text };
+    case "text_delta":
+      return { ...state, answerText: state.answerText + event.text };
     case "guard_triggered":
       return { ...state, guard: { kind: event.kind, reason: event.reason } };
     case "done":

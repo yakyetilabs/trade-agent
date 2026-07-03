@@ -243,6 +243,19 @@ class AgentTrace(BaseModel):
     classification: ImportClassification | None = None
     tool_calls: tuple[ToolCallLog, ...] = ()
     draft_response: str | None = None
+    # Whether the draft is a releasable clearance response a human can "Approve & release".
+    # False when there is nothing to release: a "cannot provide" refusal or the no-draft
+    # fallback, or a lookup that matched no shipment (the model still drafts a "no matching
+    # shipments" note). Computed once by the orchestrator (``src.agent``) and projected onto
+    # the lean ``AgentResult``; the UI gates the Approve action on it. Defaults ``False`` - the
+    # safe direction, so an unknown or pre-existing trace reads as non-releasable.
+    draft_actionable: bool = False
+    # The model's streamed reasoning (Gemini ``thinking``), accumulated from the run's
+    # ``thinking_delta`` events by the streaming runner and persisted for the audit-trail
+    # reasoning disclosure. ``None`` on the synchronous path (no deltas) and on the pre-model
+    # guard paths (the model never ran); the draft, produced by the draft tool, is the
+    # authoritative output, never this advisory text.
+    thinking_content: str | None = None
     disposition: TraceDisposition
     model: str
     escalation_reason: str | None = None
