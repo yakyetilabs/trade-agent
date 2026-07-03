@@ -48,4 +48,6 @@ node_modules/
 # Local agent/tooling config — kept local, never committed
 CLAUDE.md
 CLAUDE.local.md
+# Detailed session history moved off CLAUDE.local.md's auto-load path
+SESSION_ARCHIVE.local.md
 .claude/
