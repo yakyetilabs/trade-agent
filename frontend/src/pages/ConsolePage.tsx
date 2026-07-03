@@ -3,6 +3,8 @@ import { useEffect } from "react";
 import { DraftPanel } from "../console/DraftPanel";
 import { InquiryForm } from "../console/InquiryForm";
 import { PipelineView } from "../console/PipelineView";
+import { ReasoningPanel } from "../console/ReasoningPanel";
+import { TextStream } from "../console/TextStream";
 import { useInquiryRun } from "../console/useInquiryRun";
 import { useVendorScope } from "../vendor/VendorScopeContext";
 
@@ -28,8 +30,9 @@ function RunError({ message }: { message: string | null }) {
 
 /**
  * The analyst console (the hero surface): submit a vendor-scoped inquiry, watch the four-stage agent
- * pipeline stream live over SSE, then review, decide on, and release the grounded draft. The run
- * state machine (useInquiryRun) turns the stream into the pipeline animation and the terminal draft;
+ * pipeline stream live over SSE with the model's reasoning and response streaming alongside, then
+ * review, decide on, and release the grounded draft. The run state machine (useInquiryRun) turns the
+ * stream into the pipeline animation, the Layer-2 reasoning/response surfaces, and the terminal draft;
  * switching vendor scope clears any run so a result never bleeds across vendors.
  */
 export function ConsolePage() {
@@ -83,6 +86,10 @@ export function ConsolePage() {
       />
 
       {state.phase !== "idle" ? <PipelineView stages={state.stages} guard={state.guard} /> : null}
+      {state.reasoning ? (
+        <ReasoningPanel reasoning={state.reasoning} streaming={running} />
+      ) : null}
+      {state.answerText ? <TextStream text={state.answerText} streaming={running} /> : null}
       {state.phase === "error" ? <RunError message={state.error} /> : null}
       {state.result ? (
         <DraftPanel key={state.result.trace_id} result={state.result} guard={state.guard} />

@@ -33,6 +33,7 @@ const trace: AgentTrace = {
     },
   ],
   draft_response: "Shipment S-1003 is held pending an HTS 8542.31.0001 license.",
+  thinking_content: "Classify the inquiry, then look up S-1003 and cite the HTS clause before drafting.",
   disposition: "draft",
   model: "gemini-2.5-flash",
   escalation_reason: null,
@@ -60,5 +61,7 @@ describe("TraceRow", () => {
     expect(screen.getByRole("button", { name: "Approve & release" })).toBeInTheDocument();
     // Raw tool I/O is available but collapsed by default.
     expect(screen.getByRole("button", { name: "Show raw I/O" })).toBeInTheDocument();
+    // The persisted reasoning is offered as a folded disclosure (#15).
+    expect(screen.getByRole("button", { name: /Reasoning/ })).toBeInTheDocument();
   });
 });

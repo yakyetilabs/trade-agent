@@ -70,6 +70,8 @@ export interface AgentTrace {
   classification: ImportClassification | null;
   tool_calls: ToolCallLog[];
   draft_response: string | null;
+  /** The model's persisted reasoning (accumulated `thinking_delta`); null on guard + sync-path runs. */
+  thinking_content: string | null;
   disposition: TraceDisposition;
   model: string;
   escalation_reason: string | null;
@@ -117,9 +119,11 @@ export interface DispositionResponse {
   disposition: TraceDisposition;
 }
 
-// --- Layer-1 SSE event contract (backend/src/streaming.py) ---------------------------------------
+// --- SSE event contract (backend/src/streaming.py) -----------------------------------------------
 // The wire form is an `event: <name>` line + a `data: <json>` line; the name is not in the JSON.
-// The F2 stream reader pairs them into these tagged variants (the `type` tag = the SSE event name).
+// The stream reader pairs them into these tagged variants (the `type` tag = the SSE event name).
+// Layer-1 is the pipeline-progress vocabulary; Layer-2 adds the model's streamed reasoning/answer
+// deltas (`thinking_delta` / `text_delta`) - advisory, never reassembled into the authoritative draft.
 
 export type PipelineStage = "classify" | "lookup" | "retrieve" | "draft";
 
@@ -152,6 +156,13 @@ export interface RunStartedEvent {
 export interface StageStartedEvent {
   stage: PipelineStage;
 }
+/** Layer-2 model-output deltas: a fragment of the streamed reasoning / visible answer text. */
+export interface ThinkingDeltaEvent {
+  text: string;
+}
+export interface TextDeltaEvent {
+  text: string;
+}
 export interface GuardTriggeredEvent {
   kind: GuardKind;
   reason: string | null;
@@ -175,6 +186,8 @@ export type StreamEvent =
   | ({ type: "run_started" } & RunStartedEvent)
   | ({ type: "stage_started" } & StageStartedEvent)
   | ({ type: "stage_completed" } & StageCompletedEvent)
+  | ({ type: "thinking_delta" } & ThinkingDeltaEvent)
+  | ({ type: "text_delta" } & TextDeltaEvent)
   | ({ type: "guard_triggered" } & GuardTriggeredEvent)
   | ({ type: "done" } & DoneEvent)
   | ({ type: "error" } & ErrorEvent);

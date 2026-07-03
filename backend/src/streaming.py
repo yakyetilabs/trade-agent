@@ -111,7 +111,7 @@ def _stream_deltas(content: object) -> Iterator[tuple[DeltaKind, str]]:
 
 
 class _StreamEvent(BaseModel):
-    """Base for a Layer-1 SSE event. Frozen - an event is an emitted fact, not mutable state."""
+    """Base for an SSE event. Frozen - an event is an emitted fact, not mutable state."""
 
     model_config = ConfigDict(frozen=True)
     event_name: ClassVar[str]
@@ -238,7 +238,7 @@ def _stage_summary(tool_name: str, output: dict[str, object]) -> dict[str, objec
 async def stream_agent_run(
     vendor_id: str, inquiry: str, model_id: str | None = None
 ) -> AsyncIterator[StreamEvent]:
-    """Run the pipeline for one inquiry, emitting Layer-1 progress events as it goes.
+    """Run the pipeline for one inquiry, emitting progress and model-output events as it goes.
 
     The async, SSE-emitting sibling of :func:`src.agent.run_agent`: same guards, same vendor
     scoping, same single persisted :class:`~src.models.AgentTrace`. It always begins with

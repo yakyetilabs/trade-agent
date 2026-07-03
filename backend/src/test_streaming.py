@@ -1,4 +1,4 @@
-"""Unit tests for the Layer-1 streaming runner and the SSE event protocol.
+"""Unit tests for the streaming runner and the SSE event protocol.
 
 Hermetic like ``test_agent.py``: ``build_agent`` is replaced with a fake whose
 ``astream_events`` yields a scripted event stream and appends tool calls through the same

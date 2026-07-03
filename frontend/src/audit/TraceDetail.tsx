@@ -4,6 +4,7 @@ import { CitedDraft } from "../console/CitedDraft";
 import { DispositionActions } from "../console/DispositionActions";
 import { DispositionBadge } from "../console/DispositionBadge";
 import { formatConfidence, formatTimestamp, humanizeIntent } from "../console/format";
+import { ReasoningPanel } from "../console/ReasoningPanel";
 import { RunMetaStrip } from "../console/RunMetaStrip";
 import type { AgentTrace, TraceDisposition } from "../types/api";
 import { ToolTimeline } from "./ToolTimeline";
@@ -25,8 +26,9 @@ interface TraceDetailProps {
 
 /**
  * The expanded audit record for one run: the inquiry, the run metadata, the recorded tool timeline,
- * the grounded draft (cited identically to the Console), the billable token split, and the
- * maker-checker control - Approve/Reject while it is still a draft, else the recorded disposition.
+ * the model's persisted reasoning (a folded disclosure, shown only when the run streamed one), the
+ * grounded draft (cited identically to the Console), the billable token split, and the maker-checker
+ * control - Approve/Reject while it is still a draft, else the recorded disposition.
  */
 export function TraceDetail({ trace, vendorName, onDecided }: TraceDetailProps) {
   const draft = trace.draft_response;
@@ -62,6 +64,10 @@ export function TraceDetail({ trace, vendorName, onDecided }: TraceDetailProps) 
         </h3>
         <ToolTimeline toolCalls={trace.tool_calls} />
       </section>
+
+      {trace.thinking_content ? (
+        <ReasoningPanel reasoning={trace.thinking_content} streaming={false} defaultOpen={false} />
+      ) : null}
 
       <section className="mt-6">
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-subtle">
