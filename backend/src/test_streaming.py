@@ -293,6 +293,7 @@ def test_normal_run_streams_stage_pairs_then_done(monkeypatch: pytest.MonkeyPatc
     assert done.result.disposition is TraceDisposition.DRAFT
     assert done.result.draft_response is not None
     assert done.result.draft_response.startswith("Shipment S-1001 is held")
+    assert done.result.draft_actionable is True  # releasable draft flows through the done event
     assert done.result.tool_call_count == 4
     # Billable token split threaded through the root on_chain_end capture (prompt+output==total).
     assert (done.result.prompt_tokens, done.result.output_tokens, done.result.total_tokens) == (
@@ -559,6 +560,7 @@ def test_cross_vendor_streams_guard_then_done(monkeypatch: pytest.MonkeyPatch) -
     assert done.result.classification is not None
     assert done.result.classification.intent is InquiryIntent.CROSS_VENDOR_REFUSAL
     assert done.result.draft_response == agent._CROSS_VENDOR_REFUSAL_DRAFT
+    assert done.result.draft_actionable is False  # a refusal is never releasable
     assert len(captured) == 1
 
 

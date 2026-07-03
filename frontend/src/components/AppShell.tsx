@@ -11,9 +11,12 @@ import { TopBar } from "./TopBar";
 export function AppShell() {
   return (
     <VendorScopeProvider>
-      <div className="flex min-h-screen flex-col bg-ink">
+      {/* Height-bounded to the viewport (h-dvh) with overflow contained here, so a page can pin a
+          footer (the Console composer) while its own content region scrolls. Each routed page owns
+          its scroll: the shell no longer body-scrolls, and `main` drops its vertical padding. */}
+      <div className="flex h-dvh flex-col overflow-hidden bg-ink">
         <TopBar />
-        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6">
+        <main className="mx-auto flex w-full min-h-0 max-w-7xl flex-1 flex-col px-4 sm:px-6">
           <Outlet />
         </main>
       </div>

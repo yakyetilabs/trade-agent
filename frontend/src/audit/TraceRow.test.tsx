@@ -33,6 +33,7 @@ const trace: AgentTrace = {
     },
   ],
   draft_response: "Shipment S-1003 is held pending an HTS 8542.31.0001 license.",
+  draft_actionable: true,
   thinking_content: "Classify the inquiry, then look up S-1003 and cite the HTS clause before drafting.",
   disposition: "draft",
   model: "gemini-2.5-flash",

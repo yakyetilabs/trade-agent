@@ -18,7 +18,7 @@ export function TopBar() {
   const { email, signOut } = useAuth();
 
   return (
-    <header className="sticky top-0 z-20 border-b border-hairline bg-surface/80 backdrop-blur">
+    <header className="z-20 shrink-0 border-b border-hairline bg-surface/80 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6">
         <AppLogo />
         <nav className="ml-2 flex items-center gap-1">

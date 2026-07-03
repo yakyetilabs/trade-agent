@@ -7,6 +7,7 @@ const RESULT: AgentResult = {
   trace_id: "tr-1",
   disposition: "draft",
   draft_response: "Draft body.",
+  draft_actionable: true,
   classification: null,
   tool_call_count: 4,
   tool_names: ["classify_import_restriction"],

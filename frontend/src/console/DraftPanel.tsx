@@ -88,7 +88,11 @@ export function DraftPanel({ result, guard }: { result: AgentResult; guard: Guar
 
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-hairline pt-4">
         {disposition === "draft" ? (
-          <DispositionActions traceId={result.trace_id} onDecided={setDisposition} />
+          <DispositionActions
+            traceId={result.trace_id}
+            actionable={result.draft_actionable}
+            onDecided={setDisposition}
+          />
         ) : null}
         <div className="ml-auto flex items-center gap-2">
           <button type="button" className="btn btn-ghost" onClick={() => setEditing((v) => !v)}>

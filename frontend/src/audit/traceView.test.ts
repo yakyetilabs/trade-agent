@@ -12,6 +12,7 @@ function trace(overrides: Partial<AgentTrace>): AgentTrace {
     classification: null,
     tool_calls: [],
     draft_response: null,
+    draft_actionable: false,
     thinking_content: null,
     disposition: "draft",
     model: "gemini-2.5-flash",

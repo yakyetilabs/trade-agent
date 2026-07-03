@@ -94,6 +94,7 @@ export function TraceDetail({ trace, vendorName, onDecided }: TraceDetailProps) 
         {trace.disposition === "draft" ? (
           <DispositionActions
             traceId={trace.trace_id}
+            actionable={trace.draft_actionable}
             onDecided={(disposition) => onDecided(trace.trace_id, disposition)}
           />
         ) : (

@@ -142,6 +142,9 @@ class AgentResult(BaseModel):
     trace_id: str
     disposition: TraceDisposition
     draft_response: str | None
+    # Whether a human can meaningfully "Approve & release" the draft; the UI gates the
+    # Approve action on it. Projected from the persisted trace (see ``_is_draft_actionable``).
+    draft_actionable: bool = False
     classification: ImportClassification | None
     tool_call_count: int
     tool_names: list[str]
@@ -241,6 +244,8 @@ def run_pre_model_guards(meta: RunMeta) -> PreModelGuard | None:
                 user_inquiry=meta.inquiry,
                 classification=refusal,
                 draft_response=_CROSS_VENDOR_REFUSAL_DRAFT,
+                # A refusal is not a releasable clearance response - never offer Approve on it.
+                draft_actionable=False,
                 disposition=TraceDisposition.DRAFT,
                 model=meta.model,
                 duration_ms=_elapsed_ms(meta),
@@ -308,6 +313,52 @@ def _extract_draft(tool_calls: tuple[ToolCallLog, ...]) -> str | None:
             if isinstance(text, str):
                 draft = text
     return draft
+
+
+# Intents that never carry a releasable clearance draft: the deterministic cross-vendor
+# refusal and the no-draft iteration-cap fallback are both "cannot provide" outcomes.
+_NON_ACTIONABLE_INTENTS: frozenset[InquiryIntent] = frozenset(
+    {InquiryIntent.CROSS_VENDOR_REFUSAL, InquiryIntent.ITERATION_CAP_EXCEEDED}
+)
+
+
+def _as_int(value: object) -> int:
+    """Coerce a JSON-scalar trace value to ``int``; anything else reads as ``0``."""
+    return value if isinstance(value, int) else 0
+
+
+def _lookup_found_nothing(tool_calls: tuple[ToolCallLog, ...]) -> bool:
+    """True when at least one manifest lookup ran and none returned a shipment.
+
+    This is the "no matching shipments" case: the model still drafts (the prompt makes it
+    open with that fact), but there is no specific shipment to release. A run that never
+    looked up - e.g. a pure tariff-rate question - is deliberately not covered here; there
+    was no shipment to find, so its draft stays actionable.
+    """
+    counts = [
+        _as_int(call.output.get("count"))
+        for call in tool_calls
+        if call.tool_name == "lookup_shipment_manifest"
+    ]
+    return bool(counts) and max(counts) == 0
+
+
+def _is_draft_actionable(
+    classification: ImportClassification | None,
+    tool_calls: tuple[ToolCallLog, ...],
+    draft_response: str | None,
+) -> bool:
+    """Whether a human can meaningfully "Approve & release" this draft.
+
+    Non-actionable means there is nothing to release: no draft at all, a "cannot provide"
+    refusal / no-draft fallback, or a lookup that matched no shipment. Gating the Approve
+    action on this keeps an analyst from releasing a null result.
+    """
+    if draft_response is None:
+        return False
+    if classification is not None and classification.intent in _NON_ACTIONABLE_INTENTS:
+        return False
+    return not _lookup_found_nothing(tool_calls)
 
 
 class _TokenUsage(NamedTuple):
@@ -386,6 +437,7 @@ def build_run_trace(
         )
         draft_response = _FALLBACK_DRAFT
 
+    draft_actionable = _is_draft_actionable(classification, tool_calls, draft_response)
     usage = _sum_tokens(result_messages)
     return AgentTrace(
         trace_id=meta.trace_id,
@@ -395,6 +447,7 @@ def build_run_trace(
         classification=classification,
         tool_calls=tool_calls,
         draft_response=draft_response,
+        draft_actionable=draft_actionable,
         thinking_content=thinking_content,
         disposition=TraceDisposition.DRAFT,
         model=meta.model,
@@ -413,6 +466,7 @@ def persist_result(trace: AgentTrace) -> AgentResult:
         trace_id=trace.trace_id,
         disposition=trace.disposition,
         draft_response=trace.draft_response,
+        draft_actionable=trace.draft_actionable,
         classification=trace.classification,
         tool_call_count=len(trace.tool_calls),
         tool_names=[call.tool_name for call in trace.tool_calls],

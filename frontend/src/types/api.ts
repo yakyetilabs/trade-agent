@@ -70,6 +70,9 @@ export interface AgentTrace {
   classification: ImportClassification | null;
   tool_calls: ToolCallLog[];
   draft_response: string | null;
+  /** Whether the draft is a releasable clearance response; the UI gates Approve on it (false =
+   *  a refusal, no-draft fallback, or a lookup that matched no shipment). */
+  draft_actionable: boolean;
   /** The model's persisted reasoning (accumulated `thinking_delta`); null on guard + sync-path runs. */
   thinking_content: string | null;
   disposition: TraceDisposition;
@@ -87,6 +90,8 @@ export interface AgentResult {
   trace_id: string;
   disposition: TraceDisposition;
   draft_response: string | null;
+  /** Whether the draft is a releasable clearance response; the Console gates Approve on it. */
+  draft_actionable: boolean;
   classification: ImportClassification | null;
   tool_call_count: number;
   tool_names: string[];

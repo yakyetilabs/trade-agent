@@ -20,6 +20,7 @@ function trace(overrides: Partial<AgentTrace>): AgentTrace {
     classification: null,
     tool_calls: [],
     draft_response: "Shipment S-1003 is held pending a license.",
+    draft_actionable: true,
     thinking_content: null,
     disposition: "draft",
     model: "gemini-2.5-flash",
@@ -57,5 +58,18 @@ describe("TraceDetail", () => {
       <TraceDetail trace={trace({ thinking_content: null })} vendorName={null} onDecided={vi.fn()} />,
     );
     expect(screen.queryByRole("button", { name: /Reasoning/ })).not.toBeInTheDocument();
+  });
+
+  it("withholds Approve in the audit view when the draft is not actionable", () => {
+    render(
+      <TraceDetail
+        trace={trace({ draft_actionable: false })}
+        vendorName={null}
+        onDecided={vi.fn()}
+      />,
+    );
+    // The gate is threaded from trace.draft_actionable through to the maker-checker control.
+    expect(screen.queryByRole("button", { name: "Approve & release" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeInTheDocument();
   });
 });
