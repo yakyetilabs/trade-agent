@@ -311,19 +311,30 @@ firebase deploy --only hosting:trade-agent-ff12a
 
 Target bindings live in `.firebaserc` and `firebase.json` (built in the frontend phase).
 
-**Same-origin API via a Hosting rewrite (the chosen wiring - see `DESIGN_DECISIONS.md` §9).**
-`firebase.json` proxies `/api/**` to the Cloud Run service so the SPA and the API share one origin and the production path carries no CORS:
+**Split-origin API via a DNS-only `api.` subdomain (the current wiring - see `DESIGN_DECISIONS.md` §9).**
+Production is split-origin.
+The SPA is served from `trade-agent.samir.codes` (Firebase Hosting, Cloudflare-proxied) and calls the API cross-origin at `api.trade-agent.samir.codes`, a Cloudflare **grey-cloud (DNS-only)** `CNAME` to `ghs.googlehosted.com` backing a Cloud Run domain mapping.
+DNS-only means no CDN sits on the API path, so the SSE reasoning stream is not buffered.
+`firebase.json` therefore carries **no** `/api/**` rewrite - only the SPA fallback and asset caching:
 
 ```json
 "hosting": {
+  "public": "frontend/dist",
   "rewrites": [
-    { "source": "/api/**", "run": { "serviceId": "trade-agent-backend", "region": "us-central1" } },
     { "source": "**", "destination": "/index.html" }
   ]
 }
 ```
 
-Two consequences for later phases: the frontend calls a relative `/api` path (no `VITE_API_BASE_URL` pointed at a raw `*.run.app` URL), and the backend must set `Cache-Control: private, no-store` on authenticated responses so the Hosting CDN never caches one analyst's vendor-scoped data. Local dev reproduces the same route with the Vite dev-server proxy, so neither environment needs a cross-origin grant. This is a Hosting feature, not a load balancer, so it adds no fixed cost and respects the no-IAP/no-LB rule.
+Consequences.
+The frontend build bakes the API origin via `VITE_API_BASE_URL` in `frontend/.env.production` (`https://api.trade-agent.samir.codes/api`).
+The cross-origin call means CORS is back on the production path, so the backend must allowlist the frontend origins via `PROD_FRONTEND_ORIGINS` (set in `deploy.sh`, read by `resolve_cors_origins`, applied by `CORSMiddleware`).
+Authenticated responses still carry `Cache-Control: private, no-store`, since the frontend origin remains CDN-fronted.
+Local dev stays same-origin via the Vite dev-server proxy, so only production needs the cross-origin grant.
+This is a DNS record plus a middleware allowlist, not a load balancer or IAP, so it still adds no fixed cost and respects the no-IAP/no-LB rule.
+
+**Why the pivot (was same-origin):** the original wiring proxied `/api/**` through the Hosting CDN for a zero-CORS same-origin path, which is ideal for request/response, but the CDN buffered the later SSE stream, so the streaming path was moved off the CDN.
+See `DESIGN_DECISIONS.md` §9 "The split-origin pivot".
 
 ---
 

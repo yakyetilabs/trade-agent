@@ -19,6 +19,7 @@ This is a living document; keep appending as the deploy phase continues.
 - [Pin exact versions for reproducibility](#pin-exact-versions-for-reproducibility)
 - [In a polyglot monorepo, each ecosystem owns its own tooling root](#in-a-polyglot-monorepo-each-ecosystem-owns-its-own-tooling-root)
 - [Verify CLI and console behavior against current docs](#verify-cli-and-console-behavior-against-current-docs)
+- [Verify what is deployed, not just what is committed](#verify-what-is-deployed-not-just-what-is-committed)
 - [The actual dials for cost vs. availability on a scale-to-zero service](#the-actual-dials-for-cost-vs-availability-on-a-scale-to-zero-service)
 - [Model-API feature constraints compose; verify the combination, not each feature alone](#model-api-feature-constraints-compose-verify-the-combination-not-each-feature-alone)
 - [Open questions / to verify next](#open-questions--to-verify-next)
@@ -46,6 +47,12 @@ This is a living document; keep appending as the deploy phase continues.
   Both carry fixed hourly costs and are overkill when a path-based rewrite does the same job for free.
 - Ordering matters in the rewrite config: specific-path rules (`/api/**`) must be listed before a catch-all SPA fallback (`** -> /index.html`), or the catch-all swallows the API traffic.
 - Consequence: once there is a CDN in front of your API, authenticated responses must carry `Cache-Control: private, no-store`, or the CDN can cache one user's response and serve it to another.
+- The caveat that reverses this: a same-origin rewrite routes the API *through* the CDN, and a CDN buffers responses - which silently breaks Server-Sent Events and any streaming response, where the whole point is that bytes reach the browser frame by frame.
+- So the rule is scoped to request/response APIs.
+  The moment you add a streaming path, give *that* path a route that bypasses the CDN: a DNS-only (unproxied) subdomain straight to the origin.
+  In this project the frontend stayed same-origin, but the streaming API moved to an `api.` subdomain wired as a Cloudflare grey-cloud (DNS-only) record to Cloud Run.
+- That reintroduces CORS on the streaming path, which is a fine trade: CORS is a one-line middleware allowlist, still cheaper than the load balancer or IAP you were avoiding.
+  You are trading "zero CORS" for "unbuffered stream," not for fixed infrastructure cost.
 
 ## Authentication and authorization are different layers
 
@@ -117,6 +124,16 @@ This is a living document; keep appending as the deploy phase continues.
 - The cost of skipping verification is usually a silently wrong assumption, not a loud error.
   Assuming buildpacks were the "cheaper" choice here would have been wrong: both build on the same free-tier build service, so the assumption would have driven a worse decision without ever surfacing as a bug.
 - Practice: before writing infrastructure code or handing over a command, pull the current official doc page rather than relying on trained memory, especially for anything involving pricing, defaults, or precedence between two mechanisms.
+
+## Verify what is deployed, not just what is committed
+
+- A merged commit is not a running change.
+  The live service keeps serving its last-deployed revision until you redeploy, so the repo and production can silently disagree - especially on a scale-to-zero service you are not actively watching.
+- Probe the running system for the behavior you care about, rather than reasoning from `git log`.
+  A cheap black-box probe usually exists: here, a CORS preflight (`curl -X OPTIONS` with an `Origin` header) returned `400 Disallowed CORS origin`, which proved the deployed revision predated the commit that widened the allowlist - long before any redeploy touched it.
+- Confirm the gap precisely with `git merge-base --is-ancestor <commit> <deployed-sha>`: if that is false, the fix you assume is live simply is not.
+- The practical rule for a cutover: when the frontend and backend must change together (a new cross-origin contract, a new CORS allowlist), redeploy both.
+  Shipping only the frontend against a backend that predates the matching change is how you deploy a broken path with a green local test suite.
 - Corollary: one doc page not answering a question is not the same as the answer not existing.
   A serverless compute service can hand back two different permanent URLs for the same deployed service: a deterministic one built from a project number and region (predictable before the service is even created, useful for wiring other config to it ahead of time), and a non-deterministic one built from an opaque per-service identifier.
   Both are valid and permanent for the life of the service; neither is "the real one."
