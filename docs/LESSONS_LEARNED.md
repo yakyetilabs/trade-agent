@@ -22,6 +22,7 @@ This is a living document; keep appending as the deploy phase continues.
 - [Verify what is deployed, not just what is committed](#verify-what-is-deployed-not-just-what-is-committed)
 - [The actual dials for cost vs. availability on a scale-to-zero service](#the-actual-dials-for-cost-vs-availability-on-a-scale-to-zero-service)
 - [Model-API feature constraints compose; verify the combination, not each feature alone](#model-api-feature-constraints-compose-verify-the-combination-not-each-feature-alone)
+- [A custom domain is not authorized for federated sign-in until you allowlist it](#a-custom-domain-is-not-authorized-for-federated-sign-in-until-you-allowlist-it)
 - [Open questions / to verify next](#open-questions--to-verify-next)
 
 ## A Firebase project is a GCP project
@@ -157,6 +158,18 @@ This is a living document; keep appending as the deploy phase continues.
 - A migration snippet drafted from one doc page can carry an invalid combination that no static check catches.
   Concrete hit here: the planned Claude-on-Vertex constructor paired `temperature=0.0` with thinking enabled; verifying the extended-thinking doc plus the adapter source forced a split - the thinking-on agent loop keeps default sampling, and the structured-output classifier keeps `temperature=0` but drops thinking.
 - Practice: before swapping model providers, list the features each call site uses (thinking, structured output, forced tools, sampling pins), check the provider's compatibility rules for the pairs, and confirm with one live smoke call - the only layer where combination errors actually surface.
+
+## A custom domain is not authorized for federated sign-in until you allowlist it
+
+- A managed-auth provider's OAuth/popup sign-in checks the serving origin against a per-project authorized-domains allowlist before it will start the flow.
+  The platform's own default hosting domains are on that list out of the box, so sign-in works there from day one and hides the gap.
+  A custom domain you point at the same app is not added automatically - and the failure only shows up once you serve the app from that new origin.
+- This produces a sign-in that works on one URL and fails on another for the same build, which reads like an app bug but is pure configuration.
+  Here: sign-in worked on the default `*.web.app` origin and failed on the custom domain because only the former was in Firebase Auth's authorized domains; the fix is a one-line console addition (Authentication -> Settings -> Authorized domains), not a code change.
+- The client SDK rejects an unlisted origin before opening the popup, so the tell is a specific, greppable error code (`auth/unauthorized-domain`), not a network or popup failure.
+  Map that code to an actionable message that names the fix, rather than a generic "sign-in failed" - the next new domain you add will hit the same wall, and a message that says where to add it turns a debugging session into a thirty-second console edit.
+- General rule for any hosting-plus-federated-auth cutover: the domain allowlist is a separate surface from DNS, TLS, and the app build.
+  A custom domain resolving and serving over HTTPS does not mean auth will accept it; add the new origin to the auth provider's allowlist as an explicit step in the same cutover checklist.
 
 ## Open questions / to verify next
 

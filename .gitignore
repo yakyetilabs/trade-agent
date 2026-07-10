@@ -53,4 +53,6 @@ CLAUDE.md
 CLAUDE.local.md
 # Detailed session history moved off CLAUDE.local.md's auto-load path
 SESSION_ARCHIVE.local.md
+# Forward implementation-plan handoffs, kept local (opened on purpose, not auto-loaded)
+PIVOT_PLAN.local.md
 .claude/
