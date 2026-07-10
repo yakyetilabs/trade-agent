@@ -50,6 +50,22 @@
     color-scheme: dark;
   }
 
+  /* Light theme: flip only the neutral ramp (backgrounds, borders, three text levels) to a warm
+     ivory palette; the accent and semantic hues are unchanged, reading fine on both. Applied by
+     stamping data-theme="light" on <html> (src/theme.ts); the pre-paint script in index.html sets it
+     before first paint so there is no flash. Tailwind's utilities resolve the color tokens live, so
+     overriding the vars here recolors every tokenized background, text, and border utility. */
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --color-ink: #f4f1ea;
+    --color-surface: #ffffff;
+    --color-elevated: #ece6da;
+    --color-hairline: #ddd5c6;
+    --color-fg: #201e1a;
+    --color-fg-muted: #575249;
+    --color-fg-subtle: #857f71;
+  }
+
   html,
   body,
   #root {

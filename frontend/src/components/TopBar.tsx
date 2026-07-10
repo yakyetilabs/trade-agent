@@ -3,6 +3,7 @@ import { NavLink } from "react-router";
 import { useAuth } from "../auth/AuthContext";
 import { AppLogo } from "./AppLogo";
 import { SyntheticDataPill } from "./SyntheticDataPill";
+import { ThemeToggle } from "./ThemeToggle";
 import { VendorScopePicker } from "./VendorScopePicker";
 
 function navLinkClass({ isActive }: { isActive: boolean }): string {
@@ -33,6 +34,7 @@ export function TopBar() {
         <div className="ml-auto flex items-center gap-3 sm:gap-4">
           <SyntheticDataPill />
           <VendorScopePicker />
+          <ThemeToggle />
           <div className="flex items-center gap-3 border-l border-hairline pl-3 sm:pl-4">
             {email ? (
               <span className="hidden max-w-[18ch] truncate text-xs text-fg-muted md:inline" title={email}>
