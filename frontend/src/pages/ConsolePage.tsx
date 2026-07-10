@@ -50,6 +50,9 @@ export function ConsolePage() {
 
   const running = state.phase === "connecting" || state.phase === "streaming";
   const isTerminal = state.phase === "done" || state.phase === "guarded" || state.phase === "error";
+  // Condense the pipeline to a summary once a run settles cleanly (done/guarded); an errored run
+  // stays expanded so its partial progress reads alongside the error banner.
+  const pipelineCollapsed = state.phase === "done" || state.phase === "guarded";
 
   // Follow the newest content toward the pinned input as a run streams (Claude-like): the reasoning
   // streams into view just above the composer, then the settled draft takes that spot on completion.
@@ -94,7 +97,9 @@ export function ConsolePage() {
           </div>
         ) : null}
 
-        {state.phase !== "idle" ? <PipelineView stages={state.stages} guard={state.guard} /> : null}
+        {state.phase !== "idle" ? (
+          <PipelineView stages={state.stages} guard={state.guard} collapsed={pipelineCollapsed} />
+        ) : null}
         {state.answerText ? (
           <TextStream text={state.answerText} streaming={running} animate />
         ) : null}
