@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { DraftPanel } from "../console/DraftPanel";
+import { ExamplePrompts } from "../console/ExamplePrompts";
 import { InquiryForm } from "../console/InquiryForm";
 import { PipelineView } from "../console/PipelineView";
 import { ReasoningPanel } from "../console/ReasoningPanel";
@@ -40,12 +41,19 @@ function RunError({ message }: { message: string | null }) {
  * draft scroll in the region above and auto-follow toward the composer as a run streams.
  */
 export function ConsolePage() {
-  const { selectedVendor, selectedVendorId } = useVendorScope();
+  const { selectedVendor, selectedVendorId, vendors } = useVendorScope();
   const { state, start, reset } = useInquiryRun();
   const scrollRef = useRef<HTMLDivElement>(null);
+  // The composer text lives here (InquiryForm is controlled) so the idle example
+  // prompts can pre-fill it; the ref lets a chip click land focus in the textarea.
+  const [inquiryText, setInquiryText] = useState("");
+  const inquiryInputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     reset();
+    // A pre-filled prompt may be vendor-specific (category HTS code, scope-guard target),
+    // so a scope switch clears the composer along with the run.
+    setInquiryText("");
   }, [selectedVendorId, reset]);
 
   const running = state.phase === "connecting" || state.phase === "streaming";
@@ -59,6 +67,9 @@ export function ConsolePage() {
   // Keyed on the content-bearing run state; once terminal these stop changing, so the analyst is
   // free to scroll back up.
   useEffect(() => {
+    // Idle shows the vendor card + example prompts and must stay top-anchored;
+    // following makes sense only once run content is streaming in.
+    if (state.phase === "idle") return;
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [state.phase, state.stages, state.answerText, state.reasoning, state.result]);
@@ -97,6 +108,19 @@ export function ConsolePage() {
           </div>
         ) : null}
 
+        {/* Idle-state guided tour: example prompts pre-fill the composer (never submit).
+            They vanish once a run starts, so they never compete with the pipeline. */}
+        {state.phase === "idle" && selectedVendor ? (
+          <ExamplePrompts
+            vendor={selectedVendor}
+            vendors={vendors}
+            onSelect={(prompt) => {
+              setInquiryText(prompt);
+              inquiryInputRef.current?.focus();
+            }}
+          />
+        ) : null}
+
         {state.phase !== "idle" ? (
           <PipelineView stages={state.stages} guard={state.guard} collapsed={pipelineCollapsed} />
         ) : null}
@@ -119,6 +143,9 @@ export function ConsolePage() {
         <InquiryForm
           vendorId={selectedVendorId}
           running={running}
+          value={inquiryText}
+          onChange={setInquiryText}
+          inputRef={inquiryInputRef}
           onSubmit={(inquiry) => {
             if (selectedVendorId) start(selectedVendorId, inquiry);
           }}

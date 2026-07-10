@@ -4,9 +4,9 @@ import { VendorScopeProvider } from "../vendor/VendorScopeProvider";
 import { TopBar } from "./TopBar";
 
 /**
- * The authorized app layout: the persistent top bar over the routed page. Wrapped in
+ * The app layout: the persistent top bar over the routed page. Wrapped in
  * <VendorScopeProvider> so the vendor scope is loaded once and shared by the top-bar picker and
- * every page - and only ever fetched for an authorized analyst (this renders under RequireAuth).
+ * every page.
  */
 export function AppShell() {
   return (

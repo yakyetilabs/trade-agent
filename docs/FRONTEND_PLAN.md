@@ -19,7 +19,7 @@ The definition of done for this phase is a live, deployed URL that runs the whol
 
 This plan has been built and shipped; the sections below are preserved as the historical build spec, with inline `UPDATE:` notes where reality diverged.
 The backend, the four-surface frontend, auth, the audit trail, and the eval suite are live on Cloud Run + Firebase Hosting.
-Two deltas are worth calling out, because they change specific claims made below:
+Three deltas are worth calling out, because they change specific claims made below:
 
 - **Layer 2 landed, in a different shape than planned.**
   The model's reasoning (`thinking_delta`) and an advisory model-text stream (`text_delta`) now render live (the `ReasoningPanel` and `TextStream`), and the persisted reasoning is disclosed in the audit trace.
@@ -29,6 +29,10 @@ Two deltas are worth calling out, because they change specific claims made below
   The Hosting `/api/**` rewrite was removed because its CDN buffered the SSE stream; the API is now reached cross-origin at the DNS-only `api.trade-agent.samir.codes` subdomain, which reintroduces CORS on the prod path (allowlisted in-app).
   Local dev is unchanged (same-origin Vite proxy).
   See `DESIGN_DECISIONS.md` §9.
+- **The auth layer was removed after this plan shipped (the public-demo pivot, 2026-07-10).**
+  The Google sign-in screen, the auth context/guard, and the backend allowlist described below were built as planned and then deliberately deleted when the demo went public; spend protection moved to infra ceilings plus an in-app per-IP rate limiter.
+  Every auth-related section below is historical.
+  See `DESIGN_DECISIONS.md` §11.
 
 ## Locked decisions (do not re-litigate)
 

@@ -88,25 +88,17 @@ gcloud services enable \
 ## 3. Add Firebase to the project
 
 **Console:** https://console.firebase.google.com → **Add project** → select the existing `trade-agent-ff12a`
-GCP project (do **not** create a new one). Accept the Spark (free) plan.
+GCP project (do **not** create a new one). The project runs on the Blaze plan (required for Vertex AI +
+Cloud Run); the "$0" posture is free-tier usage + scale-to-zero, not the plan tier.
 
-### 3a. Enable Authentication
+Firebase is used for **Hosting only**.
 
-Firebase console → **Build → Authentication → Get started** → enable the sign-in provider:
-
-- **Google** ✅ — the selected provider for this build (one-click sign-in, verified email, no password).
-
-> The backend authorizes by email against the in-memory allowlist, so the provider must surface a
-> verified `email` claim in the ID token — Google does. Authorization (who is allowed) is enforced
-> server-side by the allowlist, **not** by Firebase: there is no native "approved-email list" on the
-> Spark tier, and Blocking Functions (`beforeSignIn`) would require Identity Platform + the paid Blaze
-> plan, which the $0 posture rules out. A non-approved Google user can authenticate but receives a `403`
-> from the API. The frontend also shows a cosmetic pre-auth "not on access list" message (UX only).
-
-### 3b. Register the web app (frontend config)
-
-Firebase console → **Project settings → General → Your apps → Web (`</>`)** → register an app named
-`trade-agent-web`. Copy the `firebaseConfig` values — these go into `frontend/.env.local` (Step 8).
+> **Firebase Authentication is no longer used.** The original build gated the app behind Google
+> sign-in plus a backend email allowlist; the public-demo pivot removed that layer entirely (see
+> `DESIGN_DECISIONS.md` §11 - spend is now capped by the Cloud Run instance ceiling, a Vertex quota,
+> a billing budget, and the in-app per-IP rate limiter). No Auth provider needs to be enabled, and
+> the frontend needs no registered Web App or `firebaseConfig` values. If Authentication is still
+> enabled from the pre-pivot setup, it is harmless but can be disabled in the Firebase console.
 
 ---
 
@@ -142,8 +134,7 @@ service cloud.firestore {
 
 ## 5. Service account (backend runtime + local dev)
 
-The backend uses one service account to verify Firebase tokens (Admin SDK), read/write Firestore, and
-call Vertex AI.
+The backend uses one service account to read/write Firestore and call Vertex AI.
 
 **Console:** IAM & Admin → **Service Accounts → Create** → name `trade-agent-platform-access`.
 
@@ -169,11 +160,10 @@ gcloud projects add-iam-policy-binding trade-agent-ff12a \
   --member="serviceAccount:${SA}" --role="roles/logging.logWriter"
 gcloud projects add-iam-policy-binding trade-agent-ff12a \
   --member="serviceAccount:${SA}" --role="roles/logging.viewer"
-
-# Firebase token verification (Admin SDK)
-gcloud projects add-iam-policy-binding trade-agent-ff12a \
-  --member="serviceAccount:${SA}" --role="roles/firebaseauth.admin"
 ```
+
+> A pre-pivot deployment also granted `roles/firebaseauth.admin` for Admin SDK token verification.
+> The public-demo pivot removed the auth layer, so that grant is no longer needed and can be revoked.
 
 > The `logging.viewer` grant is the deliberately-not-least-privilege bit called out in
 > `DESIGN_DECISIONS.md` §8 — minor logging read for rapid operator debugging.
@@ -248,11 +238,6 @@ VERTEX_EMBEDDING_DIM=768
 PINECONE_API_KEY=pc-xxxxxxxxxxxxxxxxxxxx
 PINECONE_INDEX=trade-agent-hts-kb
 
-# $0 zero-trust authorization: analyst -> authorized vendor scope, parsed in-memory at boot.
-# Format "email=V-001,V-002;email2=*" (entries split on ';', email/vendors on '=', vendors on ',').
-# A lone '*' grants all vendors (admin). Map keys ARE the identity allowlist (who may use the app).
-TRADE_AGENT_ANALYST_SCOPES=your-email@gmail.com=*;analyst@gmail.com=V-001,V-002
-
 # Local dev only — Cloud Run uses the attached SA instead. Either point this at a downloaded key
 # (Step 5a Method B), or leave it unset and use `gcloud auth application-default login` (Method A).
 GOOGLE_APPLICATION_CREDENTIALS=./trade-agent-sa-key.json
@@ -261,17 +246,15 @@ GOOGLE_APPLICATION_CREDENTIALS=./trade-agent-sa-key.json
 APP_ENV=local
 ```
 
-### `frontend/.env.local` (copy from `frontend/.env.local.example`)
+### `frontend/.env.local` (optional; copy from `frontend/.env.local.example`)
 
-From the Step 3b web-app config:
+The public demo needs no Firebase values. The only knob is the API base URL, and its defaults are
+usually right: dev uses the same-origin `/api` (Vite proxy), production bakes the split-origin
+`api.` subdomain from the committed `frontend/.env.production`.
 
 ```bash
-VITE_FIREBASE_API_KEY=...
-VITE_FIREBASE_AUTH_DOMAIN=trade-agent-ff12a.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=trade-agent-ff12a
-VITE_FIREBASE_APP_ID=...
-# Cloud Run service URL (filled in after Step 9), or http://127.0.0.1:8000 for local
-VITE_API_BASE_URL=http://127.0.0.1:8000
+# Only set to point local dev at a non-same-origin backend:
+# VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
 ---
@@ -297,9 +280,10 @@ gcloud run deploy trade-agent-backend \
   --project=trade-agent-ff12a
 ```
 
-- `--allow-unauthenticated` is correct here: authorization is **app-level** (Firebase JWT + allowlist),
-  not IAM. This is why we deliberately do **not** add IAP / a Load Balancer (a fixed-cost component the
-  $0 budget decision rules out).
+- `--allow-unauthenticated` is correct here: the API is a public synthetic-data demo, and spend is
+  capped app-side (instance ceiling + Vertex quota + in-app per-IP rate limiter; `DESIGN_DECISIONS.md`
+  §11), not by IAM. This is why we deliberately do **not** add IAP / a Load Balancer (a fixed-cost
+  component the $0 budget decision rules out).
 - `--min-instances=0` keeps the idle cost at $0. Trade-off: a ~5–15s cold start on the first request.
 
 ### Frontend → Firebase Hosting
@@ -329,7 +313,7 @@ DNS-only means no CDN sits on the API path, so the SSE reasoning stream is not b
 Consequences.
 The frontend build bakes the API origin via `VITE_API_BASE_URL` in `frontend/.env.production` (`https://api.trade-agent.samir.codes/api`).
 The cross-origin call means CORS is back on the production path, so the backend must allowlist the frontend origins via `PROD_FRONTEND_ORIGINS` (set in `deploy.sh`, read by `resolve_cors_origins`, applied by `CORSMiddleware`).
-Authenticated responses still carry `Cache-Control: private, no-store`, since the frontend origin remains CDN-fronted.
+API responses still carry `Cache-Control: no-store`, since the frontend origin remains CDN-fronted.
 Local dev stays same-origin via the Vite dev-server proxy, so only production needs the cross-origin grant.
 This is a DNS record plus a middleware allowlist, not a load balancer or IAP, so it still adds no fixed cost and respects the no-IAP/no-LB rule.
 
@@ -343,10 +327,9 @@ See `DESIGN_DECISIONS.md` §9 "The split-origin pivot".
 - [ ] `gcloud config get-value project` → `trade-agent-ff12a`
 - [ ] All 7 APIs from Step 2 show **Enabled** in the console
 - [ ] Firestore database exists in `us-central1` with the three `trade-agent-*` collections
-- [ ] A test user can sign up via the Firebase Auth provider you enabled
-- [ ] The service account has the 5 roles from Step 5
+- [ ] The service account has the 4 roles from Step 5
 - [ ] Local credentials ready: `gcloud auth application-default login` done (Method A), **or** `backend/trade-agent-sa-key.json` exists and is **not** tracked by git (Method B; `git status` clean)
 - [ ] Pinecone index `trade-agent-hts-kb` is **768-dim, cosine, AWS us-east-1**
-- [ ] `backend/.env` and `frontend/.env.local` populated
+- [ ] `backend/.env` populated (`frontend/.env.local` is optional)
 
-Once these pass, proceed to **Phase 1** (backend skeleton + security boundary).
+Once these pass, deploy with Step 9 (backend `deploy.sh`, then the Hosting deploy).

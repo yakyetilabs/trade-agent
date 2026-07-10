@@ -171,6 +171,15 @@ This is a living document; keep appending as the deploy phase continues.
 - General rule for any hosting-plus-federated-auth cutover: the domain allowlist is a separate surface from DNS, TLS, and the app build.
   A custom domain resolving and serving over HTTPS does not mean auth will accept it; add the new origin to the auth provider's allowlist as an explicit step in the same cutover checklist.
 
+## Referencing a bundler's whole env object embeds every env var in the shipped bundle
+
+- Vite statically replaces `import.meta.env` at build time.
+  Read it property-by-property (`import.meta.env.VITE_X`) and only the values you use are inlined; capture the whole object once (`const env = import.meta.env`) and the bundler embeds every `VITE_*` variable visible at build time - including values from a machine-local `.env.local` that the code no longer reads.
+- The failure is silent because the app works either way; the leak only shows up if you grep the built artifact.
+  Concrete hit here: after removing the Firebase auth layer, the prod bundle still contained the Firebase config strings because `config.ts` captured the whole env object; switching to per-key reads dropped them.
+- Practice for any Vite (or similar static-replacement) frontend: read env vars per-key in the one config module, and add a post-build grep of `dist/` for values that should be gone as part of removal work.
+  These are usually public identifiers, not secrets, but a removal is not done until the artifact is clean.
+
 ## Open questions / to verify next
 
 - Whether a Server-Sent Events stream survives a CDN-fronted Hosting layer fully unbuffered, end to end.

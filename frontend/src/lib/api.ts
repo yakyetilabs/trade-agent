@@ -1,10 +1,7 @@
 /**
- * The application's API client singleton - the API surface bound to the real Firebase token source.
- *
- * Components and providers import `api` from here. The client itself (src/lib/apiClient.ts) stays
- * Firebase-agnostic and unit-testable; this module is the one place the two are wired together.
+ * The application's API client singleton. Components and providers import `api` from here;
+ * the client factory itself (src/lib/apiClient.ts) stays unit-testable with an injected base URL.
  */
 import { createApiClient } from "./apiClient";
-import { getFirebaseIdToken } from "./firebase";
 
-export const api = createApiClient(getFirebaseIdToken);
+export const api = createApiClient();

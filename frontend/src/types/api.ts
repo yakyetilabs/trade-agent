@@ -106,11 +106,6 @@ export interface AgentResult {
 
 // --- Endpoint request/response payloads ----------------------------------------------------------
 
-export interface IdentityResponse {
-  email: string;
-  authorized: boolean;
-}
-
 export interface InquiryRequest {
   vendor_id: string;
   inquiry: string;

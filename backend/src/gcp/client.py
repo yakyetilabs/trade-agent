@@ -14,21 +14,10 @@ single-source-of-clients rule.
 
 from functools import lru_cache
 
-import firebase_admin
-from firebase_admin import App, credentials
 from google import genai
 from google.cloud.firestore import Client as FirestoreClient
 
 from src.config import GCP_PROJECT, GCP_REGION
-
-
-@lru_cache(maxsize=1)
-def get_firebase_app() -> App:
-    """Initialize the Firebase Admin app once (ADC / GOOGLE_APPLICATION_CREDENTIALS)."""
-    return firebase_admin.initialize_app(
-        credential=credentials.ApplicationDefault(),
-        options={"projectId": GCP_PROJECT},
-    )
 
 
 @lru_cache(maxsize=1)

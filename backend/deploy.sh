@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Deploy the backend to Cloud Run. Cloud Build builds backend/Dockerfile (gcloud auto-prefers
 # it over buildpacks) and pushes to the auto-created `cloud-run-source-deploy` Artifact
-# Registry repo. Authorization is app-level (Firebase JWT + allowlist), so the service is
-# --allow-unauthenticated and there is deliberately no IAP / Load Balancer.
+# Registry repo. The API is a public synthetic-data demo (no sign-in), so the service is
+# --allow-unauthenticated and there is deliberately no IAP / Load Balancer; spend is capped
+# by the instance ceiling below plus the in-app per-IP rate limiter.
 set -euo pipefail
 
 # Run from backend/ regardless of the caller's cwd (so `--source=.` is this directory).
@@ -16,26 +17,17 @@ SERVICE="${SERVICE_NAME:-trade-agent-backend}"
 SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-trade-agent-platform-access@${PROJECT}.iam.gserviceaccount.com}"
 PINECONE_SECRET="${PINECONE_SECRET:-trade-agent-pinecone-api-key}"
 
-# Resource tuning for a heavy AI request (langchain + grpc imports + model calls). Modest
-# --concurrency so many in-flight agent runs scale out to new instances rather than OOM one;
-# --max-instances caps the cost/quota blast radius; --min-instances=0 keeps idle cost at $0.
+# Resource tuning for a heavy AI request (langchain + grpc imports + model calls).
+# max-instances x concurrency is the TRUE parallel-run ceiling on Cloud Run (unlike Lambda,
+# where reserved concurrency alone caps it): 2 x 1 = at most 2 agent runs in flight, the
+# public demo's hard spend ceiling (docs/DESIGN_DECISIONS.md §11). concurrency=1 also gives
+# each run its own instance, so one run's memory spike cannot OOM another's request.
+# --min-instances=0 keeps idle cost at $0.
 MEMORY="${MEMORY:-1Gi}"
 CPU="${CPU:-1}"
-CONCURRENCY="${CONCURRENCY:-8}"
-MAX_INSTANCES="${MAX_INSTANCES:-4}"
+CONCURRENCY="${CONCURRENCY:-1}"
+MAX_INSTANCES="${MAX_INSTANCES:-2}"
 TIMEOUT="${TIMEOUT:-300}"
-
-# TRADE_AGENT_ANALYST_SCOPES is the identity allowlist + vendor-scope map (not a secret, but
-# we don't bake a personal email into a committed script). Take it from the environment, or
-# pull just that one line from backend/.env - never source .env wholesale (it holds secrets).
-if [[ -z "${TRADE_AGENT_ANALYST_SCOPES:-}" && -f .env ]]; then
-  TRADE_AGENT_ANALYST_SCOPES="$(grep -E '^TRADE_AGENT_ANALYST_SCOPES=' .env | tail -1 | cut -d= -f2-)"
-fi
-if [[ -z "${TRADE_AGENT_ANALYST_SCOPES:-}" ]]; then
-  echo "ERROR: TRADE_AGENT_ANALYST_SCOPES is not set (export it or add it to backend/.env)." >&2
-  echo "       Format: email=V-001,V-002;email2=*   (a lone * grants all vendors / admin)." >&2
-  exit 1
-fi
 
 # The CORS allow-list: every browser origin the frontend is served from. Split-origin
 # deploy (docs/DESIGN_DECISIONS.md §9) - the frontend calls the api. subdomain from at
@@ -55,7 +47,7 @@ fi
 if ! gcloud iam service-accounts describe "$SERVICE_ACCOUNT" --project="$PROJECT" --quiet >/dev/null 2>&1; then
   echo "ERROR: runtime service account '$SERVICE_ACCOUNT' does not exist. Create it + grant its" >&2
   echo "       roles once (GCP_SETUP.md §5): aiplatform.user, datastore.user, logging.logWriter," >&2
-  echo "       logging.viewer, firebaseauth.admin, and secretmanager.secretAccessor on the secret." >&2
+  echo "       logging.viewer, and secretmanager.secretAccessor on the secret." >&2
   exit 1
 fi
 if ! gcloud services list --enabled --project="$PROJECT" --quiet \
@@ -77,8 +69,8 @@ EOF
   exit 1
 fi
 
-# Env vars go through a YAML file, not --set-env-vars: the scopes value contains commas and
-# semicolons, which are gcloud's list delimiters and would corrupt an inline --set-env-vars.
+# Env vars go through a YAML file, not --set-env-vars: the origins value contains commas,
+# which are gcloud's list delimiters and would corrupt an inline --set-env-vars.
 # Secrets stay out of this file - the Pinecone key is mounted from Secret Manager below.
 ENV_FILE="$(mktemp)"
 trap 'rm -f "$ENV_FILE"' EXIT
@@ -86,7 +78,6 @@ cat > "$ENV_FILE" <<EOF
 APP_ENV: production
 GCP_PROJECT: "$PROJECT"
 GCP_REGION: "$REGION"
-TRADE_AGENT_ANALYST_SCOPES: "$TRADE_AGENT_ANALYST_SCOPES"
 PROD_FRONTEND_ORIGINS: "$PROD_FRONTEND_ORIGINS"
 EOF
 
@@ -109,5 +100,5 @@ gcloud run deploy "$SERVICE" \
 URL="$(gcloud run services describe "$SERVICE" --project="$PROJECT" --region="$REGION" \
   --format='value(status.url)')"
 echo "==> Deployed: $URL"
-echo "    Smoke test (needs a Firebase ID token for an allowlisted analyst):"
-echo "      curl -sS -H \"Authorization: Bearer \$ID_TOKEN\" $URL/api/me"
+echo "    Smoke test (public API, no token):"
+echo "      curl -sS $URL/health && curl -sS $URL/api/vendors"

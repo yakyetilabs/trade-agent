@@ -483,8 +483,8 @@ def persist_result(trace: AgentTrace) -> AgentResult:
 def run_agent(vendor_id: str, inquiry: str, model_id: str | None = None) -> AgentResult:
     """Run the pipeline synchronously for one analyst inquiry and persist its audit trace.
 
-    ``vendor_id`` is the deterministically resolved scope (validated against the allowlist
-    and dropdown upstream); ``inquiry`` is the analyst's raw question. ``model_id`` overrides
+    ``vendor_id`` is the deterministically resolved scope (pattern-validated at the API
+    edge upstream); ``inquiry`` is the analyst's raw question. ``model_id`` overrides
     the primary model - used by the Flash-vs-Pro eval. The async, SSE-emitting variant
     is :func:`src.streaming.stream_agent_run`; both share the steps documented above.
     """

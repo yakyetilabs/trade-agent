@@ -1,29 +1,24 @@
 """FastAPI application surface for the trade-agent backend.
 
-The perimeter is an open liveness probe plus the analyst-facing API. Every route sits
-behind two layers of the security boundary:
+The API is a public demo over synthetic data - there is no sign-in and no user identity.
+The safety posture is in-app and deterministic instead: vendor scoping is bound
+server-side into the agent's execution context (``VendorContext``), the pre-model
+escalation guard intercepts flagged inquiries before any model call, dispositions are
+draft-only until a human approves, and every run is audited to Firestore. Every
+``/api/*`` route additionally sits behind the in-app per-IP rate limiter
+(``src/ratelimit.py``); ``/health`` stays unlimited.
 
-1. ``verify_authorized_analyst`` — *who* may use the app at all (Firebase-Admin token
-   verification + the in-memory allowlist).
-2. ``analyst_can_access_vendor`` — *which vendor* an authorized analyst may act on.
-   Every endpoint that touches vendor-scoped data enforces this, so an analyst can only
-   query, list, audit, and dispose of records for vendors in their authorized scope:
-
-- ``POST /api/inquiry``                       run the agent (403 + audit log if out of scope)
-- ``POST /api/inquiry/stream``                run the agent, stream stages + reasoning (same gate)
-- ``GET  /api/vendors``                       the analyst's authorized vendors (the picker)
-- ``GET  /api/traces``                        recent audit traces, filtered to that scope
-- ``POST /api/traces/{trace_id}/disposition`` human approve/reject (scoped to the trace's vendor)
-
-Scope is resolved server-side from the analyst's verified identity — never from a
-client-supplied claim — so the dropdown filtering is UX and these checks are the boundary.
+- ``POST /api/inquiry``                       run the agent for a chosen vendor
+- ``POST /api/inquiry/stream``                run the agent, stream stages + reasoning
+- ``GET  /api/vendors``                       all vendors (the scope picker)
+- ``GET  /api/traces``                        recent audit traces, newest first
+- ``POST /api/traces/{trace_id}/disposition`` human approve/reject
 """
 
-import logging
 from collections.abc import AsyncIterator
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -32,10 +27,8 @@ from src import repository
 from src.agent import AgentResult, UnknownVendorError, run_agent
 from src.config import APP_ENV, CORS_ORIGINS, VERTEX_PRIMARY_MODEL
 from src.models import VENDOR_ID_PATTERN, AgentTrace, TraceDisposition, Vendor
-from src.security import analyst_can_access_vendor, verify_authorized_analyst
-from src.streaming import sse_format, stream_agent_run
-
-_logger = logging.getLogger(__name__)
+from src.ratelimit import RateLimitDecision, rate_limiter, resolve_client_ip
+from src.streaming import DoneEvent, sse_format, stream_agent_run
 
 app = FastAPI(title="trade-agent backend", version="0.1.0")
 
@@ -60,18 +53,11 @@ class HealthResponse(BaseModel):
     primary_model: str
 
 
-class IdentityResponse(BaseModel):
-    """Returned by the protected probe to confirm the verified analyst identity."""
-
-    email: str
-    authorized: bool
-
-
 class InquiryRequest(BaseModel):
-    """An analyst inquiry scoped to a vendor chosen from the dropdown.
+    """An inquiry scoped to a vendor chosen from the dropdown.
 
     ``vendor_id`` is pattern-validated here so a malformed scope is a 422 at the edge,
-    never reaching the orchestrator; authorization and existence are checked downstream.
+    never reaching the orchestrator; existence is checked downstream.
     """
 
     vendor_id: str = Field(pattern=VENDOR_ID_PATTERN)
@@ -92,9 +78,38 @@ class DispositionResponse(BaseModel):
     disposition: TraceDisposition
 
 
+def enforce_rate_limit(request: Request, response: Response) -> RateLimitDecision:
+    """Per-IP admission gate for every ``/api/*`` route: reserves one request from the
+    caller's budget and refuses with 429 (``Retry-After`` + ``X-RateLimit-*``) when a
+    budget is exhausted.
+
+    The caller key is the RIGHTMOST ``X-Forwarded-For`` entry - the one Google's front
+    end appends for the actually-connected peer (leading entries are caller-supplied and
+    spoofable; the DNS-only ``api.`` origin has no proxy in front, so that peer is the
+    real client). Successful admissions surface ``X-RateLimit-*`` via the injected
+    ``response``; the streaming route re-attaches them itself, because FastAPI merges
+    dependency-set headers only onto serialized responses, not onto a directly returned
+    ``Response`` (verified against the installed FastAPI 0.138).
+    """
+    client_ip = resolve_client_ip(
+        request.headers.get("x-forwarded-for"),
+        request.client.host if request.client is not None else None,
+    )
+    decision = rate_limiter.check_and_reserve(client_ip)
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded for this IP. Try again shortly.",
+            headers=decision.headers,
+        )
+    for name, value in decision.headers.items():
+        response.headers[name] = value
+    return decision
+
+
 @app.get("/health")
 def health() -> HealthResponse:
-    """Unauthenticated liveness probe — never touches GCP or the allowlist."""
+    """Liveness probe — never touches GCP."""
     return HealthResponse(
         status="ok",
         app_env=APP_ENV,
@@ -102,132 +117,102 @@ def health() -> HealthResponse:
     )
 
 
-@app.get("/api/me")
-def whoami(email: str = Depends(verify_authorized_analyst)) -> IdentityResponse:
-    """Protected probe: reaching this means the auth boundary admitted the caller."""
-    return IdentityResponse(email=email, authorized=True)
-
-
 @app.post("/api/inquiry", response_model=AgentResult)
 def submit_inquiry(
     request: InquiryRequest,
-    analyst_email: str = Depends(verify_authorized_analyst),
+    admission: Annotated[RateLimitDecision, Depends(enforce_rate_limit)],
 ) -> AgentResult:
-    """Run the agent pipeline for one inquiry, scoped to the analyst's authorized vendor.
+    """Run the agent pipeline for one inquiry, scoped to the chosen vendor.
 
-    An out-of-scope vendor is refused with a 403 *before* any model or Firestore work and
-    a structured scope-violation log — the audit signal a reviewer expects to stay at zero.
-    A run is synchronous (the model call dominates), so FastAPI dispatches this sync handler
-    to its worker threadpool, keeping the trace ``ContextVar`` on one thread.
+    ``vendor_id`` is bound server-side into ``VendorContext`` before the graph runs,
+    so the model never sees an unscoped data pool. A run is synchronous (the model call
+    dominates), so FastAPI dispatches this sync handler to its worker threadpool,
+    keeping the trace ``ContextVar`` on one thread. The run's actual token usage is
+    debited against the caller's TPM budget after it returns.
     """
-    if not analyst_can_access_vendor(analyst_email, request.vendor_id):
-        _logger.warning(
-            "scope_violation: analyst=%s requested vendor=%s outside authorized scope",
-            analyst_email,
-            request.vendor_id,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized for the requested vendor scope.",
-        )
     try:
-        return run_agent(request.vendor_id, request.inquiry)
+        result = run_agent(request.vendor_id, request.inquiry)
     except UnknownVendorError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unknown vendor: {exc.vendor_id}",
         ) from exc
+    rate_limiter.debit_tokens(admission.client_ip, result.total_tokens or 0)
+    return result
 
 
 @app.post("/api/inquiry/stream")
 async def submit_inquiry_stream(
     request: InquiryRequest,
-    analyst_email: str = Depends(verify_authorized_analyst),
+    admission: Annotated[RateLimitDecision, Depends(enforce_rate_limit)],
 ) -> StreamingResponse:
-    """Streaming variant of ``POST /api/inquiry``: the same auth and vendor-scope gate, then a
-    ``text/event-stream`` of pipeline-stage progress plus the model's streamed reasoning and
-    answer deltas, ending in a ``done`` event carrying the ``AgentResult`` (see
-    ``src/streaming.py`` for the event contract).
+    """Streaming variant of ``POST /api/inquiry``: a ``text/event-stream`` of
+    pipeline-stage progress plus the model's streamed reasoning and answer deltas,
+    ending in a ``done`` event carrying the ``AgentResult`` (see ``src/streaming.py``
+    for the event contract).
 
-    The out-of-scope refusal is a plain 403 *before* the stream opens - identical to the
-    non-streaming path and its scope-violation audit log. Once streaming, an unknown vendor
-    or an unexpected failure surfaces as a terminal ``error`` event (the status is already
-    200). The authenticated stream carries ``Cache-Control: no-store`` - it sits behind the
-    Hosting CDN in production.
+    Once streaming, an unknown vendor or an unexpected failure surfaces as a terminal
+    ``error`` event (the status is already 200). The stream reaches the browser through
+    the DNS-only ``api.`` origin - no CDN in the path - and the headers below ask any
+    other intermediary not to buffer or cache it.
     """
-    if not analyst_can_access_vendor(analyst_email, request.vendor_id):
-        _logger.warning(
-            "scope_violation: analyst=%s requested vendor=%s outside authorized scope (stream)",
-            analyst_email,
-            request.vendor_id,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized for the requested vendor scope.",
-        )
 
     async def _events() -> AsyncIterator[str]:
-        async for event in stream_agent_run(request.vendor_id, request.inquiry):
-            yield sse_format(event)
+        total_tokens = 0
+        try:
+            async for event in stream_agent_run(request.vendor_id, request.inquiry):
+                if isinstance(event, DoneEvent) and event.result.total_tokens:
+                    total_tokens = event.result.total_tokens
+                yield sse_format(event)
+        finally:
+            # A run's cost is knowable only from the terminal done event, so the TPM
+            # budget settles when the stream closes (client disconnects included).
+            rate_limiter.debit_tokens(admission.client_ip, total_tokens)
 
     return StreamingResponse(
         _events(),
         media_type="text/event-stream",
-        # no-store: authenticated payload behind the Hosting CDN. X-Accel-Buffering=no asks any
-        # intermediary proxy not to buffer, so stages arrive live (confirmed end-to-end in F5).
-        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        # no-store: never cache a live run. X-Accel-Buffering=no asks any intermediary
+        # proxy not to buffer, so stages arrive live (confirmed end-to-end in F5).
+        # X-RateLimit-* attach here directly: FastAPI does not merge dependency-set
+        # headers onto a directly returned Response (see enforce_rate_limit).
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", **admission.headers},
     )
 
 
-@app.get("/api/vendors", response_model=list[Vendor])
-def list_vendors(analyst_email: str = Depends(verify_authorized_analyst)) -> list[Vendor]:
-    """List the vendors THIS analyst is authorized for — the scope-selection dropdown.
-
-    Filtering here is UX; the authoritative gate is the per-request check on every
-    vendor-scoped endpoint. An admin (``*`` grant) sees all vendors.
-    """
-    return [
-        vendor
-        for vendor in repository.list_vendors()
-        if analyst_can_access_vendor(analyst_email, vendor.vendor_id)
-    ]
+@app.get(
+    "/api/vendors",
+    response_model=list[Vendor],
+    dependencies=[Depends(enforce_rate_limit)],
+)
+def list_vendors() -> list[Vendor]:
+    """List all vendors — the scope-selection dropdown for the public demo."""
+    return repository.list_vendors()
 
 
-@app.get("/api/traces", response_model=list[AgentTrace])
-def list_traces(analyst_email: str = Depends(verify_authorized_analyst)) -> list[AgentTrace]:
-    """Return recent audit traces for vendors in this analyst's scope, newest first."""
-    return [
-        trace
-        for trace in repository.list_recent_traces(_RECENT_TRACES_LIMIT)
-        if analyst_can_access_vendor(analyst_email, trace.vendor_id)
-    ]
+@app.get(
+    "/api/traces",
+    response_model=list[AgentTrace],
+    dependencies=[Depends(enforce_rate_limit)],
+)
+def list_traces() -> list[AgentTrace]:
+    """Return recent audit traces, newest first — the public observability surface."""
+    return repository.list_recent_traces(_RECENT_TRACES_LIMIT)
 
 
-@app.post("/api/traces/{trace_id}/disposition", response_model=DispositionResponse)
-def set_trace_disposition(
-    trace_id: str,
-    request: DispositionRequest,
-    analyst_email: str = Depends(verify_authorized_analyst),
-) -> DispositionResponse:
-    """Record a human reviewer's approve/reject decision — the mandatory handoff that flips
-    a draft out of the agent's hands. Scoped to the trace's vendor: a 404 means no such
-    trace; a 403 means it belongs to a vendor outside the reviewer's authorized scope."""
+@app.post(
+    "/api/traces/{trace_id}/disposition",
+    response_model=DispositionResponse,
+    dependencies=[Depends(enforce_rate_limit)],
+)
+def set_trace_disposition(trace_id: str, request: DispositionRequest) -> DispositionResponse:
+    """Record a human reviewer's approve/reject decision — the mandatory handoff that
+    flips a draft out of the agent's hands. A 404 means no such trace."""
     trace = repository.get_trace(trace_id)
     if trace is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unknown trace: {trace_id}",
-        )
-    if not analyst_can_access_vendor(analyst_email, trace.vendor_id):
-        _logger.warning(
-            "scope_violation: analyst=%s attempted disposition on trace=%s vendor=%s out of scope",
-            analyst_email,
-            trace_id,
-            trace.vendor_id,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized for this trace's vendor scope.",
         )
     disposition = TraceDisposition(request.disposition)
     repository.update_trace_disposition(trace_id, disposition)

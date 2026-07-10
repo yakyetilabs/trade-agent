@@ -29,9 +29,9 @@ const VENDOR: Vendor = {
 };
 
 describe("createApiClient", () => {
-  it("targets the same-origin base and attaches the bearer + Accept headers on a GET", async () => {
+  it("targets the configured base and attaches the Accept header on a GET", async () => {
     const fetchMock = stubFetch(jsonResponse([VENDOR]));
-    const client = createApiClient(async () => "tok-123", "/api");
+    const client = createApiClient("/api");
 
     const vendors = await client.listVendors();
 
@@ -40,26 +40,17 @@ describe("createApiClient", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/vendors");
     const headers = new Headers(init?.headers);
-    expect(headers.get("Authorization")).toBe("Bearer tok-123");
     expect(headers.get("Accept")).toBe("application/json");
+    // Public demo: no auth, so no Authorization header is ever attached.
+    expect(headers.has("Authorization")).toBe(false);
     // A GET has no body, so no Content-Type is set.
     expect(headers.get("Content-Type")).toBeNull();
-  });
-
-  it("omits the Authorization header when no user is signed in", async () => {
-    const fetchMock = stubFetch(jsonResponse([]));
-    const client = createApiClient(async () => null, "/api");
-
-    await client.listVendors();
-
-    const [, init] = fetchMock.mock.calls[0];
-    expect(new Headers(init?.headers).has("Authorization")).toBe(false);
   });
 
   it("POSTs an inquiry with a JSON body + Content-Type and returns the parsed result", async () => {
     const result: Partial<AgentResult> = { trace_id: "tr-abc", disposition: "draft" };
     const fetchMock = stubFetch(jsonResponse(result));
-    const client = createApiClient(async () => "tok", "/api");
+    const client = createApiClient("/api");
 
     const returned = await client.submitInquiry({ vendor_id: "V-001", inquiry: "why held?" });
 
@@ -73,7 +64,7 @@ describe("createApiClient", () => {
 
   it("posts the disposition decision to the url-encoded trace path", async () => {
     const fetchMock = stubFetch(jsonResponse({ trace_id: "tr-1", disposition: "approved" }));
-    const client = createApiClient(async () => "tok", "/api");
+    const client = createApiClient("/api");
 
     await client.setDisposition("tr-1", "approved");
 
@@ -82,26 +73,25 @@ describe("createApiClient", () => {
     expect(init?.body).toBe(JSON.stringify({ disposition: "approved" }));
   });
 
-  it("throws an ApiError carrying the status and FastAPI detail on a 403", async () => {
-    stubFetch(jsonResponse({ detail: "Not authorized for the requested vendor scope." }, { status: 403 }));
-    const client = createApiClient(async () => "tok", "/api");
+  it("throws an ApiError carrying the status and FastAPI detail on a 404", async () => {
+    stubFetch(jsonResponse({ detail: "Unknown vendor: V-404" }, { status: 404 }));
+    const client = createApiClient("/api");
 
-    const error = await client.getIdentity().then(
+    const error = await client.submitInquiry({ vendor_id: "V-404", inquiry: "x" }).then(
       () => null,
       (e: unknown) => e,
     );
 
     expect(error).toBeInstanceOf(ApiError);
     if (error instanceof ApiError) {
-      expect(error.status).toBe(403);
-      expect(error.isForbidden).toBe(true);
-      expect(error.detail).toBe("Not authorized for the requested vendor scope.");
+      expect(error.status).toBe(404);
+      expect(error.detail).toBe("Unknown vendor: V-404");
     }
   });
 
   it("still throws an ApiError when the error body is not JSON", async () => {
     stubFetch(new Response("<html>502</html>", { status: 502 }));
-    const client = createApiClient(async () => "tok", "/api");
+    const client = createApiClient("/api");
 
     const error = await client.listTraces().then(
       () => null,

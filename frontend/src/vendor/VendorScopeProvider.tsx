@@ -5,9 +5,8 @@ import type { Vendor } from "../types/api";
 import { VendorScopeContext, type VendorScopeValue } from "./VendorScopeContext";
 
 /**
- * Loads the analyst's authorized vendors once (GET /api/vendors) and holds the current selection.
- * Mounted inside the authorized app shell, so the fetch only runs for an authenticated, allowlisted
- * analyst. The selection defaults to the first vendor and is preserved across reloads when possible.
+ * Loads the vendor list once (GET /api/vendors) and holds the current selection.
+ * The selection defaults to the first vendor and is preserved across reloads when possible.
  */
 export function VendorScopeProvider({ children }: { children: ReactNode }) {
   const [vendors, setVendors] = useState<Vendor[]>([]);
