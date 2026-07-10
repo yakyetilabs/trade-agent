@@ -6,7 +6,6 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]>=0.115",
     "pydantic>=2.7",
-    "firebase-admin>=6.5",
     "google-cloud-firestore>=2.16",
     # Model + KB layer: chat + eval via langchain-google-genai (ChatGoogleGenerativeAI on
     # Vertex, vertexai=True; ADC auth, no API key); embeddings via the raw google-genai

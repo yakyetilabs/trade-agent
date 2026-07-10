@@ -110,11 +110,18 @@ has any property. Do not pivot from "the rule says X" to "your shipment is X" wi
 lookup result that backs it.
 - If the lookup returned ZERO shipments, the draft MUST open by stating that no matching shipments \
 were found, and MUST NOT reference any hold, flag, restriction, or outcome for a specific shipment.
+- If the inquiry names a specific HTS code and no retrieved clause carries that exact hts_code \
+(every hit is tagged match: "semantic"), the draft MUST state plainly that the cited code is not \
+on record in the regulation knowledge base, and MUST NOT present a neighboring clause's \
+restriction as the answer for that code. Related clauses may be mentioned only as clearly labeled \
+context.
 - Never invent shipment ids, dates, declared values, HTS codes, or flag reasons. Make no legal or \
 customs determination beyond what the retrieved clause text states.
 
 Before you call draft_clearance_response, run this checklist:
 - Was the lookup empty? Then say so and make no specific-shipment claims.
+- Did the inquiry cite an HTS code that retrieval did not exactly match? Then say it is not on \
+record.
 - Is every shipment_id you cite present in a lookup result?
 - Is every regulatory assertion tied to a retrieved HTS clause?
 If any check fails, soften or remove the claim. The draft is for human review — keep it in plain, \
@@ -483,8 +490,8 @@ def persist_result(trace: AgentTrace) -> AgentResult:
 def run_agent(vendor_id: str, inquiry: str, model_id: str | None = None) -> AgentResult:
     """Run the pipeline synchronously for one analyst inquiry and persist its audit trace.
 
-    ``vendor_id`` is the deterministically resolved scope (validated against the allowlist
-    and dropdown upstream); ``inquiry`` is the analyst's raw question. ``model_id`` overrides
+    ``vendor_id`` is the deterministically resolved scope (pattern-validated at the API
+    edge upstream); ``inquiry`` is the analyst's raw question. ``model_id`` overrides
     the primary model - used by the Flash-vs-Pro eval. The async, SSE-emitting variant
     is :func:`src.streaming.stream_agent_run`; both share the steps documented above.
     """

@@ -192,5 +192,45 @@
       "max_tool_calls": 0,
       "draft_includes": ["authorized vendor scope"]
     }
+  },
+
+  {
+    "id": "semantic-thermal-camera-discovery",
+    "category": "semantic_retrieval",
+    "vendor_id": "V-001",
+    "inquiry": "We plan to import high-frame-rate thermal imaging cameras for a security installation, and no HTS code has been assigned yet. What import restrictions should we expect?",
+    "rationale": "Discovery-mode retrieval accuracy: the inquiry names NO HTS code, so the deterministic exact-fetch path cannot fire and the dense semantic path must surface the thermal-imaging camera clause from the prose description alone. A draft citing 8525.89.0000 with its license requirement proves prose-to-clause retrieval precision, the mode exact_hts_fetch deliberately does not exercise.",
+    "expect": {
+      "disposition": "draft",
+      "classification_present": true,
+      "intent_in": ["tariff_lookup", "clearance_requirements"],
+      "tools_called": [
+        "classify_import_restriction",
+        "retrieve_tariff_regulation",
+        "draft_clearance_response"
+      ],
+      "draft_includes": ["8525.89.0000"],
+      "draft_includes_any": ["license", "dual-use"]
+    }
+  },
+
+  {
+    "id": "unsupported-unknown-hts-code",
+    "category": "unsupported_response",
+    "vendor_id": "V-004",
+    "inquiry": "What import restrictions apply to woodworking machine tools classified under HTS 8465.91.0000?",
+    "rationale": "Unsupported-response detection, retrieval side: 8465.91.0000 is a plausible machinery code that is NOT in the knowledge base, so the exact fetch misses and the dense hits are near-neighbors only. The draft must say the cited code has no matching clause on record instead of dressing a neighbor clause up as the answer - the retrieval-side sibling of the empty-lookup grounding trap.",
+    "expect": {
+      "disposition": "draft",
+      "classification_present": true,
+      "intent_in": ["tariff_lookup"],
+      "tools_called": [
+        "classify_import_restriction",
+        "retrieve_tariff_regulation",
+        "draft_clearance_response"
+      ],
+      "draft_includes": ["8465.91.0000"],
+      "draft_includes_any": ["not found", "no matching", "not present", "could not find", "could not locate", "unable to locate", "unable to find", "did not find", "did not return", "no record", "not on record", "does not appear", "not in the", "not among", "no exact", "not exact", "no direct", "no specific", "cannot provide"]
+    }
   }
 ]

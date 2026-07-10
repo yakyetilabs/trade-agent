@@ -11,7 +11,6 @@
  */
 import { useCallback, useEffect, useReducer, useRef } from "react";
 
-import { getFirebaseIdToken } from "../lib/firebase";
 import { streamInquiry } from "../lib/inquiryStream";
 import type {
   AgentResult,
@@ -194,7 +193,6 @@ export function useInquiryRun(): InquiryRunController {
         for await (const event of streamInquiry({
           vendorId,
           inquiry,
-          getToken: getFirebaseIdToken,
           signal: controller.signal,
         })) {
           if (controller.signal.aborted) return;

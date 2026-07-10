@@ -1,17 +1,16 @@
 /**
  * SSE client for the agent pipeline: POST /api/inquiry/stream, streamed as it runs.
  *
- * The browser consumes the stream with `fetch` + a `ReadableStream` reader (NOT `EventSource`) so the
- * Firebase Bearer token can ride in the Authorization header (docs/FRONTEND_PLAN.md "Transport
- * notes"). Frames are `event: <name>\ndata: <json>\n\n` blocks; `parseSseBlock` turns one block into a
- * `StreamEvent` (the `type` tag = the SSE event name; the JSON never carries the name), and
- * `streamInquiry` buffers raw bytes into complete blocks and yields them. The vocabulary is the
- * Layer-1 pipeline-progress events plus the Layer-2 model-output deltas (`thinking_delta` /
- * `text_delta`). Same-origin `/api`, same as the JSON client - Vite proxy in dev, Hosting rewrite in
- * prod.
+ * The browser consumes the stream with `fetch` + a `ReadableStream` reader (NOT `EventSource`,
+ * which cannot POST the inquiry body). Frames are `event: <name>\ndata: <json>\n\n` blocks;
+ * `parseSseBlock` turns one block into a `StreamEvent` (the `type` tag = the SSE event name; the
+ * JSON never carries the name), and `streamInquiry` buffers raw bytes into complete blocks and
+ * yields them. The vocabulary is the pipeline-progress events plus the model-output deltas
+ * (`thinking_delta` / `text_delta`). Same API base as the JSON client - the same-origin Vite proxy
+ * in dev, the split-origin api. subdomain in prod (DNS-only, so the stream arrives unbuffered).
  */
 import { config } from "../config";
-import { type TokenProvider, toApiError } from "./apiClient";
+import { toApiError } from "./apiClient";
 import type { StreamEvent } from "../types/api";
 
 /** The SSE `event:` names the backend emits (src/streaming.py). An unknown name is ignored. */
@@ -29,8 +28,6 @@ const KNOWN_EVENTS: ReadonlySet<string> = new Set([
 export interface StreamInquiryOptions {
   vendorId: string;
   inquiry: string;
-  /** Resolves the current Firebase ID token (injected, so this module stays SDK-agnostic). */
-  getToken: TokenProvider;
   /** Aborts the in-flight fetch when the run is superseded or the component unmounts. */
   signal?: AbortSignal;
   baseUrl?: string;
@@ -65,15 +62,14 @@ export function parseSseBlock(block: string): StreamEvent | null {
 /**
  * Run one inquiry against the streaming endpoint, yielding pipeline events as they arrive.
  *
- * Throws an `ApiError` if the pre-stream response is not ok (a 403 scope refusal, a 401, a 422 - the
- * gate runs before the stream opens). Once streaming, backend-side failures surface as terminal
- * `error` events in the stream, not exceptions. An aborted signal rejects the underlying read; the
- * caller distinguishes that from a real failure via `signal.aborted`.
+ * Throws an `ApiError` if the pre-stream response is not ok (a 404, a 422 - validation runs before
+ * the stream opens). Once streaming, backend-side failures surface as terminal `error` events in
+ * the stream, not exceptions. An aborted signal rejects the underlying read; the caller
+ * distinguishes that from a real failure via `signal.aborted`.
  */
 export async function* streamInquiry({
   vendorId,
   inquiry,
-  getToken,
   signal,
   baseUrl = config.apiBaseUrl,
 }: StreamInquiryOptions): AsyncGenerator<StreamEvent> {
@@ -81,8 +77,6 @@ export async function* streamInquiry({
     "Content-Type": "application/json",
     Accept: "text/event-stream",
   });
-  const token = await getToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const response = await fetch(`${baseUrl}/inquiry/stream`, {
     method: "POST",

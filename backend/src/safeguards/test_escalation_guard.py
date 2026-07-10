@@ -33,6 +33,14 @@ def test_escalation_is_case_insensitive() -> None:
     assert should_escalate("CONTRABAND in the container").escalate is True
 
 
+def test_hyphenated_phrasing_still_escalates() -> None:
+    # Live-verified miss before hyphen normalization: "under-the-table" slipped past
+    # the spaced "under the table" pattern and reached a real model run.
+    result = should_escalate("A broker offered an under-the-table payment to speed things up.")
+    assert result.escalate is True
+    assert result.reason == "bribery"
+
+
 # --- NON-ESCALATION CASES (legitimate trade inquiries) ---
 
 

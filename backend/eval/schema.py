@@ -22,12 +22,15 @@ _CASES_PATH = Path(__file__).parent / "cases.json"
 
 
 class EvalCategory(StrEnum):
-    """The four curated categories (mirrors DESIGN_DECISIONS.md §6) - one per
-    load-bearing system property: the grounded pipeline, the exact-fetch retrieval
-    mode, and the two deterministic pre-model guards."""
+    """The curated categories (mirrors DESIGN_DECISIONS.md §6) - one per load-bearing
+    system property: the grounded pipeline, the two retrieval modes (deterministic
+    exact fetch and semantic discovery), unsupported-response detection, and the two
+    deterministic pre-model guards."""
 
     HAPPY_PATH = "happy_path"
     EXACT_HTS_FETCH = "exact_hts_fetch"
+    SEMANTIC_RETRIEVAL = "semantic_retrieval"
+    UNSUPPORTED_RESPONSE = "unsupported_response"
     ESCALATION_TRIGGERS = "escalation_triggers"
     SCOPE_VIOLATIONS = "scope_violations"
 

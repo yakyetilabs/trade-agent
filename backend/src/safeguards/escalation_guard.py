@@ -15,6 +15,8 @@ Rules are intentionally narrow: a false positive routes a legitimate inquiry
 away from the agent and degrades the demo. String patterns match
 case-insensitively as substrings; compiled regex patterns are used for short
 tokens that need word boundaries (so "bribe" does not fire inside another word).
+Hyphens normalize to spaces before matching, so a hyphenated compound
+("under-the-table") cannot slip past its spaced pattern.
 """
 
 import re
@@ -104,11 +106,13 @@ def should_escalate(inquiry: str) -> EscalationDecision:
     Does not call any model. Returns the matched *category* (a stable, indexable
     audit value) rather than a verbose reason string.
     """
-    normalized = inquiry.lower()
+    # Hyphens become spaces so "under-the-table payment" trips the spaced pattern -
+    # a live-verified miss before this normalization.
+    normalized = inquiry.lower().replace("-", " ")
     for rule in _TRIGGER_RULES:
         for pattern in rule.patterns:
             matched = (
-                bool(pattern.search(inquiry))
+                bool(pattern.search(normalized))
                 if isinstance(pattern, re.Pattern)
                 else pattern.lower() in normalized
             )

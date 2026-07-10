@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, type Ref } from "react";
 
 const MAX_INQUIRY_LENGTH = 4000;
 
@@ -7,25 +7,36 @@ interface InquiryFormProps {
   vendorId: string | null;
   /** A run is connecting or streaming - the input locks until it finishes. */
   running: boolean;
+  /** Controlled composer text - the page owns it so example prompts can pre-fill it. */
+  value: string;
+  onChange: (text: string) => void;
   onSubmit: (inquiry: string) => void;
+  /** Lets the page focus the textarea after a prompt chip pre-fills it. */
+  inputRef?: Ref<HTMLTextAreaElement>;
 }
 
 /**
  * The natural-language inquiry input (1-4000 chars, matching `InquiryRequest`). Cmd/Ctrl+Enter
  * submits. Submission is disabled with no vendor scope, while a run is in flight, or when the text is
  * empty or over the limit; the counter turns red past the cap so an over-long paste is visible rather
- * than silently truncated.
+ * than silently truncated. The text is controlled (`value`/`onChange`) so the idle example prompts
+ * can pre-fill the composer from outside.
  */
-export function InquiryForm({ vendorId, running, onSubmit }: InquiryFormProps) {
-  const [text, setText] = useState("");
-
-  const trimmedLength = text.trim().length;
-  const overLimit = text.length > MAX_INQUIRY_LENGTH;
+export function InquiryForm({
+  vendorId,
+  running,
+  value,
+  onChange,
+  onSubmit,
+  inputRef,
+}: InquiryFormProps) {
+  const trimmedLength = value.trim().length;
+  const overLimit = value.length > MAX_INQUIRY_LENGTH;
   const canSubmit = Boolean(vendorId) && !running && trimmedLength > 0 && !overLimit;
 
   function submit() {
     if (!canSubmit) return;
-    onSubmit(text.trim());
+    onSubmit(value.trim());
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -53,8 +64,9 @@ export function InquiryForm({ vendorId, running, onSubmit }: InquiryFormProps) {
 
       <textarea
         id="inquiry"
-        value={text}
-        onChange={(event) => setText(event.target.value)}
+        ref={inputRef}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
         disabled={running}
         rows={4}
@@ -77,7 +89,7 @@ export function InquiryForm({ vendorId, running, onSubmit }: InquiryFormProps) {
             className={`font-mono text-xs ${overLimit ? "text-danger" : "text-fg-subtle"}`}
             aria-live="polite"
           >
-            {text.length.toLocaleString("en-US")} / {MAX_INQUIRY_LENGTH.toLocaleString("en-US")}
+            {value.length.toLocaleString("en-US")} / {MAX_INQUIRY_LENGTH.toLocaleString("en-US")}
           </span>
           <button type="submit" className="btn btn-primary" disabled={!canSubmit}>
             {running ? "Running…" : "Run inquiry"}

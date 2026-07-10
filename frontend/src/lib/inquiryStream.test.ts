@@ -77,26 +77,25 @@ describe("streamInquiry", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse(chunks)));
 
     const events = await collect(
-      streamInquiry({ vendorId: "V-001", inquiry: "hi", getToken: async () => "tok", baseUrl: "/api" }),
+      streamInquiry({ vendorId: "V-001", inquiry: "hi", baseUrl: "/api" }),
     );
 
     expect(events.map((e) => e.type)).toEqual(["run_started", "stage_started", "done"]);
     expect(events[2]).toMatchObject({ type: "done", result: { trace_id: "t1" } });
   });
 
-  it("posts to the streaming endpoint with the bearer token and JSON body", async () => {
+  it("posts to the streaming endpoint with the JSON body and no auth header", async () => {
     const fetchMock = vi.fn().mockResolvedValue(sseResponse(["event: done\ndata: {\"result\":{}}\n\n"]));
     vi.stubGlobal("fetch", fetchMock);
 
-    await collect(
-      streamInquiry({ vendorId: "V-001", inquiry: "why held?", getToken: async () => "tok", baseUrl: "/api" }),
-    );
+    await collect(streamInquiry({ vendorId: "V-001", inquiry: "why held?", baseUrl: "/api" }));
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/inquiry/stream");
     expect(init.method).toBe("POST");
     const headers = new Headers(init.headers);
-    expect(headers.get("Authorization")).toBe("Bearer tok");
+    // Public demo: no auth, so no Authorization header is ever attached.
+    expect(headers.has("Authorization")).toBe(false);
     expect(headers.get("Accept")).toBe("text/event-stream");
     expect(init.body).toBe(JSON.stringify({ vendor_id: "V-001", inquiry: "why held?" }));
   });
@@ -105,15 +104,15 @@ describe("streamInquiry", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ detail: "Not authorized for the requested vendor scope." }), {
-          status: 403,
+        new Response(JSON.stringify({ detail: "Unknown vendor: V-404" }), {
+          status: 404,
           headers: { "Content-Type": "application/json" },
         }),
       ),
     );
 
     const error = await collect(
-      streamInquiry({ vendorId: "V-002", inquiry: "x", getToken: async () => "tok", baseUrl: "/api" }),
+      streamInquiry({ vendorId: "V-404", inquiry: "x", baseUrl: "/api" }),
     ).then(
       () => null,
       (e: unknown) => e,
@@ -121,8 +120,8 @@ describe("streamInquiry", () => {
 
     expect(error).toBeInstanceOf(ApiError);
     if (error instanceof ApiError) {
-      expect(error.status).toBe(403);
-      expect(error.isForbidden).toBe(true);
+      expect(error.status).toBe(404);
+      expect(error.detail).toBe("Unknown vendor: V-404");
     }
   });
 });

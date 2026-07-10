@@ -62,10 +62,9 @@ The product's value is grounded drafting speed under a hard human-approval gate,
 A single inquiry runs through a fixed, auditable sequence.
 The model only runs in the middle of that sequence, and only after the deterministic guards have cleared the case.
 
-**1. Authenticate and scope.**
-The analyst signs in with Firebase.
-The backend verifies the token and checks the email against an in-memory allowlist before any model or database work happens, so unauthorized traffic cannot drain the metered AI budget.
-The analyst selects an active vendor from the set their identity is entitled to, and that `vendor_id` is resolved server-side and never trusted from the client.
+**1. Scope.**
+There is no sign-in - the app is a public demo over synthetic data (the original allowlist perimeter was removed in the public-demo pivot; spend is capped by infra ceilings plus an in-app per-IP rate limiter, see `DESIGN_DECISIONS.md` §11).
+The analyst selects an active vendor from the picker, and that `vendor_id` is pattern-validated server-side and bound into the run, never trusted as free text.
 
 **2. Open a case.**
 The analyst submits a natural-language inquiry, for example "Why is my latest cargo container held at the port?"

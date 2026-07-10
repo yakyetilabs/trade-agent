@@ -1,10 +1,10 @@
 """Suite-integrity + grounding tests for the eval cases.
 
 These run hermetically (no model): they validate that ``cases.json`` parses, keeps the
-curated 4x3 shape (12 cases, 3 per category), has unique ids, and - critically - that
-every cited shipment is a real generated shipment owned by the case's vendor. That last
-check makes it impossible for the suite to silently drift away from the synthetic seed
-data.
+curated shape (the 4x3 core grid plus two single-case retrieval probes, 14 cases total),
+has unique ids, and - critically - that every cited shipment is a real generated shipment
+owned by the case's vendor. That last check makes it impossible for the suite to silently
+drift away from the synthetic seed data.
 """
 
 from collections import Counter
@@ -13,11 +13,19 @@ from eval.schema import EvalCategory, load_cases
 from src.data.generators import build_shipments, build_vendors
 
 
-def test_suite_is_the_curated_twelve() -> None:
-    """The curation contract: exactly 12 cases, exactly 3 per category (the 4x3 grid)."""
+def test_suite_matches_the_curated_shape() -> None:
+    """The curation contract: the 4x3 core grid plus the two single-case retrieval probes
+    (semantic discovery accuracy, unsupported-response detection) - 14 cases total."""
     cases = load_cases()
-    assert len(cases) == 12
-    assert Counter(c.category for c in cases) == {category: 3 for category in EvalCategory}
+    assert len(cases) == 14
+    assert Counter(c.category for c in cases) == {
+        EvalCategory.HAPPY_PATH: 3,
+        EvalCategory.EXACT_HTS_FETCH: 3,
+        EvalCategory.ESCALATION_TRIGGERS: 3,
+        EvalCategory.SCOPE_VIOLATIONS: 3,
+        EvalCategory.SEMANTIC_RETRIEVAL: 1,
+        EvalCategory.UNSUPPORTED_RESPONSE: 1,
+    }
 
 
 def test_case_ids_are_unique() -> None:
