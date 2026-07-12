@@ -1,4 +1,4 @@
-"""Unit tests for the domain models — validation rules and KB rendering."""
+"""Unit tests for the domain models - validation rules and KB rendering."""
 
 import pytest
 from pydantic import ValidationError
@@ -35,7 +35,7 @@ def _clause(**overrides: object) -> HtsClause:
 def test_vendor_id_pattern_is_enforced() -> None:
     with pytest.raises(ValidationError):
         Vendor(
-            vendor_id="VENDOR-1",  # wrong shape — must be V-\d{3,}
+            vendor_id="VENDOR-1",  # wrong shape - must be V-\d{3,}
             legal_name="Bad Co",
             country="US",
             customs_broker="Broker",
@@ -46,7 +46,7 @@ def test_vendor_id_pattern_is_enforced() -> None:
 def test_shipment_id_pattern_is_enforced() -> None:
     with pytest.raises(ValidationError):
         Shipment(
-            shipment_id="S-12",  # too short — must be S-\d{4,}
+            shipment_id="S-12",  # too short - must be S-\d{4,}
             vendor_id="V-001",
             bill_of_lading="BOL-1",
             carrier="C",
@@ -61,7 +61,7 @@ def test_shipment_id_pattern_is_enforced() -> None:
 
 def test_hts_page_content_includes_code_title_and_description() -> None:
     content = _clause().page_content()
-    assert "HTS 8471.30.0100 — Portable digital computers" in content
+    assert "HTS 8471.30.0100 - Portable digital computers" in content
     assert "Laptop and tablet computers" in content
     assert "Note:" not in content  # no note supplied
 
@@ -158,7 +158,7 @@ def test_agent_trace_rejects_malformed_vendor_id() -> None:
 
 
 def test_agent_trace_thinking_content_defaults_none() -> None:
-    """thinking_content is optional — None on the synchronous and pre-model-guard paths."""
+    """thinking_content is optional - None on the synchronous and pre-model-guard paths."""
     trace = AgentTrace(
         trace_id="tr-think",
         timestamp="2026-06-25T00:00:00Z",

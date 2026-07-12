@@ -1,6 +1,6 @@
 """Embed the synthetic HTS clauses and upsert them into the Pinecone KB.
 
-The knowledge base is shared, public-style HTS reference text — it is deliberately
+The knowledge base is shared, public-style HTS reference text - it is deliberately
 *not* vendor-partitioned. Each clause is embedded with Vertex AI
 ``gemini-embedding-001`` at 768 dimensions (via the shared ``VertexEmbeddings``
 adapter, which pins ``output_dimensionality`` explicitly) and upserted into the
@@ -58,7 +58,7 @@ def _ingest(documents: list[Document], ids: list[str]) -> None:
     embeddings = VertexEmbeddings()
 
     # Fail fast if the embedder's output width doesn't match the fixed index
-    # dimension — Pinecone would otherwise reject the upsert with an opaque error.
+    # dimension - Pinecone would otherwise reject the upsert with an opaque error.
     probe_dim = len(embeddings.embed_query(documents[0].page_content))
     if probe_dim != VERTEX_EMBEDDING_DIM:
         raise SystemExit(
@@ -87,7 +87,7 @@ def main() -> None:
     documents, ids = _build_documents()
 
     if args.dry_run:
-        print(f"DRY RUN — {len(documents)} clause(s), no network calls:")
+        print(f"DRY RUN - {len(documents)} clause(s), no network calls:")
         for doc in documents:
             print(f"  [dry-run] {PINECONE_INDEX}/{doc.id} ({len(doc.page_content)} chars)")
         return

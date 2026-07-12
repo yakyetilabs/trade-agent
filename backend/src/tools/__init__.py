@@ -1,4 +1,4 @@
-"""Agent tools — one file per tool. Vendor scope arrives via ``ToolRuntime``.
+"""Agent tools - one file per tool. Vendor scope arrives via ``ToolRuntime``.
 
 Intentionally a plain package marker with no re-exports: each tool function
 shares its name with its module, so re-exporting here would shadow the submodule

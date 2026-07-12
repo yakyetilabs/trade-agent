@@ -2,7 +2,7 @@
 
 The Firestore client singleton is monkeypatched with a ``MagicMock`` so these
 tests exercise the mapping logic (dict <-> model, scope-field reads, write
-payloads) hermetically — no real Firestore, no credentials, no network.
+payloads) hermetically - no real Firestore, no credentials, no network.
 """
 
 from unittest.mock import MagicMock

@@ -1,14 +1,14 @@
 """Firestore data-access layer.
 
 The single place that reads and writes the ``trade-agent-*`` collections. All
-functions go through the Firestore client *singleton* in ``src/gcp/client.py`` —
+functions go through the Firestore client *singleton* in ``src/gcp/client.py`` -
 never construct a client here. Documents are keyed by their natural id
 (``vendor_id`` / ``shipment_id`` / ``trace_id``).
 
 Vendor scoping note: shipments live in a flat collection keyed by the globally
 unique ``shipment_id`` with ``vendor_id`` as a field. That lets ``get_shipment``
 fetch any shipment in one read; the *caller* (the vendor-scoped lookup tool)
-compares ``vendor_id`` to detect — and audit — cross-vendor access in that same
+compares ``vendor_id`` to detect - and audit - cross-vendor access in that same
 single read, rather than needing a second unscoped query.
 """
 
@@ -53,7 +53,7 @@ def get_vendor(vendor_id: str) -> Vendor | None:
 
 
 def list_vendors() -> list[Vendor]:
-    """List every vendor — backs the analyst's vendor-picker dropdown."""
+    """List every vendor - backs the analyst's vendor-picker dropdown."""
     return [
         Vendor.model_validate(doc.to_dict() or {})
         for doc in _collection(FIRESTORE_VENDORS_COLLECTION).stream()
@@ -84,7 +84,7 @@ def get_shipment_owner(shipment_id: str) -> str | None:
 
 
 def list_shipments_for_vendor(vendor_id: str) -> list[Shipment]:
-    """List every shipment for one vendor — a vendor-scoped query (no cross-vendor)."""
+    """List every shipment for one vendor - a vendor-scoped query (no cross-vendor)."""
     query: Query = _collection(FIRESTORE_SHIPMENTS_COLLECTION).where(
         filter=FieldFilter("vendor_id", "==", vendor_id)
     )
@@ -111,7 +111,7 @@ def put_trace(trace: AgentTrace) -> None:
 
 
 def update_trace_disposition(trace_id: str, disposition: TraceDisposition) -> None:
-    """Flip a trace's disposition — the human-review approve/reject action."""
+    """Flip a trace's disposition - the human-review approve/reject action."""
     _collection(FIRESTORE_TRACES_COLLECTION).document(trace_id).update(
         {"disposition": disposition.value}
     )

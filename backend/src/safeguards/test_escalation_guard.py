@@ -56,7 +56,7 @@ def test_tariff_and_license_questions_do_not_escalate() -> None:
 
 
 def test_restricted_but_legal_goods_do_not_escalate() -> None:
-    # A List I precursor is a *restricted import* the agent handles — not a
+    # A List I precursor is a *restricted import* the agent handles - not a
     # criminal/security escalation. The classifier/lookup deals with it.
     result = should_escalate("Why is my ephedrine shipment flagged for clearance?")
     assert result.escalate is False

@@ -32,7 +32,7 @@ _MODELS: dict[str, str] = {"flash": VERTEX_PRIMARY_MODEL, "pro": VERTEX_EVAL_MOD
 
 @dataclass(frozen=True)
 class RunRow:
-    """One case run under one model — the serializable unit of a report."""
+    """One case run under one model - the serializable unit of a report."""
 
     model: str
     case_id: str
@@ -94,11 +94,11 @@ def summarize(rows: Sequence[RunRow], labels: Sequence[str]) -> str:
     """Render a markdown Flash-vs-Pro report: accuracy by category, latency, cost."""
     categories = sorted({r.category for r in rows})
     lines: list[str] = [
-        f"# Eval Report — {datetime.now(UTC).isoformat(timespec='seconds')}",
+        f"# Eval Report - {datetime.now(UTC).isoformat(timespec='seconds')}",
         "",
         f"Models: {', '.join(labels)}",
         "",
-        "## Accuracy — cases fully passed",
+        "## Accuracy - cases fully passed",
         "",
         "| Category | " + " | ".join(labels) + " |",
         "|" + "---|" * (len(labels) + 1),

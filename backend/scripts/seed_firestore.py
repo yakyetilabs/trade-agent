@@ -82,7 +82,7 @@ def main() -> None:
     vendors = build_vendors()
     shipments = build_shipments(args.seed)
 
-    mode = "DRY RUN — no writes" if args.dry_run else f"project={GCP_PROJECT}"
+    mode = "DRY RUN - no writes" if args.dry_run else f"project={GCP_PROJECT}"
     print(f"Seeding Firestore ({mode})")
 
     vendor_count = _seed_collection(

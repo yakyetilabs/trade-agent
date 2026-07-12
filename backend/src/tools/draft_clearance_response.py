@@ -1,9 +1,9 @@
-"""Tool 4: draft_clearance_response (signals only — does not persist).
+"""Tool 4: draft_clearance_response (signals only - does not persist).
 
 Per the draft-only commitment, this tool records the analyst-facing draft as a
 *signal* on the trace and returns the active trace id. It does **not** write to
 Firestore and has no network hook to submit anything to a port or customs
-system — the surrounding agent loop persists one atomic trace at the end (so it
+system - the surrounding agent loop persists one atomic trace at the end (so it
 can attach run-level metadata the tool can't see), and a human reviews and sends
 every response.
 """
@@ -43,7 +43,7 @@ def draft_clearance_response(
 ) -> dict[str, object]:
     """Record your final clearance-response draft for human review. Provide the response text, the
     HTS codes you cite, the shipment IDs you cite, and your confidence (0-1). This does NOT send
-    anything — a human reviews and sends every response. Call this exactly once, at the end."""
+    anything - a human reviews and sends every response. Call this exactly once, at the end."""
     return run_draft_clearance_response(
         response_text, cited_hts_codes, cited_shipment_ids, confidence
     )

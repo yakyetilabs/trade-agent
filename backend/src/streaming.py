@@ -9,8 +9,8 @@ SAME single :class:`~src.models.AgentTrace` and ends with a ``done`` event carry
 ``AgentResult``.
 
 The event vocabulary below is the wire contract - the Layer-1 pipeline-progress events plus
-the Layer-2 model-output deltas (the frontend rationale for the phased rollout is in
-``docs/FRONTEND_PLAN.md``):
+the Layer-2 model-output deltas (the streaming contract is documented in
+``docs/architecture.md``, "Streaming"):
 
 - ``run_started``    ``{ trace_id, vendor_id, model }`` - always first.
 - ``stage_started``  ``{ stage }`` - a tool began (classify / lookup / retrieve / draft).

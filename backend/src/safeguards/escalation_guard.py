@@ -1,13 +1,13 @@
 """Pre-agent escalation guard.
 
 Deterministic, model-free interception of inquiries that must never reach the
-LLM. Severe trade-security signals — contraband, OFAC/sanctions, active federal
-seizures, and bribery — are routed straight to a human escalation queue *before*
+LLM. Severe trade-security signals - contraband, OFAC/sanctions, active federal
+seizures, and bribery - are routed straight to a human escalation queue *before*
 the agent loop runs. The model is not the first line of defense for these.
 
 This is distinct from a *restricted import*. A license-required or even
 ``prohibited`` HTS band (e.g. a List I chemical precursor) is a routine
-compliance case the agent is designed to analyze and draft a response for —
+compliance case the agent is designed to analyze and draft a response for -
 those do **not** escalate here. Escalation is reserved for criminal/security
 signals where a model is the wrong first responder.
 

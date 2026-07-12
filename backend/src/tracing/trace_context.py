@@ -57,7 +57,7 @@ def append_tool_call(log: ToolCallLog) -> None:
     """Append a tool-call entry to the active trace.
 
     If called outside :func:`trace_context` (e.g. a tool invoked directly in a
-    unit test), the entry is dropped with a warning rather than raising — tools
+    unit test), the entry is dropped with a warning rather than raising - tools
     must stay callable without a surrounding run.
     """
     ctx = _current_trace.get()
@@ -77,7 +77,7 @@ def record_tool_call(tool_name: str, tool_input: dict[str, object]) -> Generator
     """Time a tool invocation and append a :class:`ToolCallLog` on block exit.
 
     Yields a mutable ``output`` dict the caller fills with a summary of what the
-    tool produced. The entry is recorded even if the block raises — the audit
+    tool produced. The entry is recorded even if the block raises - the audit
     trail captures the attempt, not just the successes.
     """
     started = time.perf_counter()

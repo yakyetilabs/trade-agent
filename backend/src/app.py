@@ -40,13 +40,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Recent-trace page size for the AgentOps view — comfortably inside the Firestore
+# Recent-trace page size for the AgentOps view - comfortably inside the Firestore
 # free-tier read budget, served natively by order_by + limit (no client-side sort).
 _RECENT_TRACES_LIMIT = 50
 
 
 class HealthResponse(BaseModel):
-    """Liveness payload — intentionally free of any vendor or user data."""
+    """Liveness payload - intentionally free of any vendor or user data."""
 
     status: str
     app_env: str
@@ -65,7 +65,7 @@ class InquiryRequest(BaseModel):
 
 
 class DispositionRequest(BaseModel):
-    """Human-review decision on a draft. Only approve/reject are caller-settable —
+    """Human-review decision on a draft. Only approve/reject are caller-settable -
     ``draft``/``escalated`` are written by the agent, never by this endpoint."""
 
     disposition: Literal["approved", "rejected"]
@@ -109,7 +109,7 @@ def enforce_rate_limit(request: Request, response: Response) -> RateLimitDecisio
 
 @app.get("/health")
 def health() -> HealthResponse:
-    """Liveness probe — never touches GCP."""
+    """Liveness probe - never touches GCP."""
     return HealthResponse(
         status="ok",
         app_env=APP_ENV,
@@ -186,7 +186,7 @@ async def submit_inquiry_stream(
     dependencies=[Depends(enforce_rate_limit)],
 )
 def list_vendors() -> list[Vendor]:
-    """List all vendors — the scope-selection dropdown for the public demo."""
+    """List all vendors - the scope-selection dropdown for the public demo."""
     return repository.list_vendors()
 
 
@@ -196,7 +196,7 @@ def list_vendors() -> list[Vendor]:
     dependencies=[Depends(enforce_rate_limit)],
 )
 def list_traces() -> list[AgentTrace]:
-    """Return recent audit traces, newest first — the public observability surface."""
+    """Return recent audit traces, newest first - the public observability surface."""
     return repository.list_recent_traces(_RECENT_TRACES_LIMIT)
 
 
@@ -206,7 +206,7 @@ def list_traces() -> list[AgentTrace]:
     dependencies=[Depends(enforce_rate_limit)],
 )
 def set_trace_disposition(trace_id: str, request: DispositionRequest) -> DispositionResponse:
-    """Record a human reviewer's approve/reject decision — the mandatory handoff that
+    """Record a human reviewer's approve/reject decision - the mandatory handoff that
     flips a draft out of the agent's hands. A 404 means no such trace."""
     trace = repository.get_trace(trace_id)
     if trace is None:

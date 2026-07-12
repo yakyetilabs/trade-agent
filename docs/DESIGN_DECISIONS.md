@@ -1,6 +1,6 @@
 # Design Decisions
 
-The architecture in this repository is not improvised. The design decisions follow a framework in the **MIT Sloan School of Management — _Implementing Agentic AI: Building Your Organizational Playbook_**.
+The architecture in this repository is not improvised. The design decisions follow a framework in the **MIT Sloan School of Management - _Implementing Agentic AI: Building Your Organizational Playbook_**.
 This document maps that framework's questions to the engineering choices in this codebase. Each section names the decision, the alternative I considered, the framework that guided the call, and the code location where the decision lives. If I claim something about the architecture, you can audit it against a file.
 
 The point of this page is to make one thing visible: this project is not a generic framework demo with an arbitrary backend. It is a specific set of architectural commitments made under a specific governance philosophy. The same skeleton would re-skin to almost any regulated-industry agentic workflow where data boundaries and audit trails are non-negotiable.
@@ -34,13 +34,13 @@ The trade skin is proof the philosophy was built, not merely described.
 
 A working definition disciplines everything downstream. The one I'm using:
 
-> _An agentic AI system uses an LLM as the reasoning brain to autonomously achieve a given task by executing tools, reviewing the execution output, and deciding whether to iterate or present the final response — within boundaries the surrounding system enforces._
+> _An agentic AI system uses an LLM as the reasoning brain to autonomously achieve a given task by executing tools, reviewing the execution output, and deciding whether to iterate or present the final response - within boundaries the surrounding system enforces._
 
 The boundary clause is the load-bearing part. The unbounded version of this definition ("...without human intervention") is what people usually say. The bounded version is what production looks like. Every safeguard in this codebase exists because the unbounded version is the wrong design target for an enterprise global supply chain or customs clearance workflow.
 
-This definition also rules things out. A linear RAG pipeline that retrieves text chunks and synthesizes an answer is **not** an agent under this definition — there is no decision to iterate, no tool selection, no execution review. That distinction matters because much of what is shipped as "agentic AI" today is a RAG wrapper with a chat interface. This project is deliberately not that.
+This definition also rules things out. A linear RAG pipeline that retrieves text chunks and synthesizes an answer is **not** an agent under this definition - there is no decision to iterate, no tool selection, no execution review. That distinction matters because much of what is shipped as "agentic AI" today is a RAG wrapper with a chat interface. This project is deliberately not that.
 
-**See:** [`backend/src/agent.py`](https://github.com/yakyetilabs/trade-agent/blob/main/backend/src/agent.py) — the agent loop's iteration and routing logic.
+**See:** [`backend/src/agent.py`](https://github.com/yakyetilabs/trade-agent/blob/main/backend/src/agent.py) - the agent loop's iteration and routing logic.
 
 ---
 
@@ -50,13 +50,13 @@ This definition also rules things out. A linear RAG pipeline that retrieves text
 
 **Action.** The agent is authorized to invoke exactly four tools: `classify_import_restriction`, `lookup_shipment_manifest`, `retrieve_tariff_regulation`, and `draft_clearance_response`. Each tool's blast radius is tightly bounded. `lookup_shipment_manifest` is read-only and vendor-scoped. `draft_clearance_response` writes to an internal trace review queue, not to an outbound EDI port or custom system. The agent has no tool that alters container flags, pays customs duties, or accesses another vendor's bills of lading. _(See [`backend/src/tools/`](https://github.com/yakyetilabs/trade-agent/blob/main/backend/src/tools/).)_
 
-**Planning.** Task decomposition, not unchecked chain-of-thought. The agent decomposes every compliance inquiry into a structured sequence — classify, lookup, retrieve, draft — with each step verifiable in the trace log. I rejected free-form, unconstrained planning because in an auditable corporate workflow, the audit trail is the product. A model that reasons in opaque chains and produces correct answers is less valuable than a model that follows a known sequence and produces deterministic, auditable ones. _(See [`backend/src/agent.py`](https://github.com/yakyetilabs/trade-agent/blob/main/backend/src/agent.py).)_
+**Planning.** Task decomposition, not unchecked chain-of-thought. The agent decomposes every compliance inquiry into a structured sequence - classify, lookup, retrieve, draft - with each step verifiable in the trace log. I rejected free-form, unconstrained planning because in an auditable corporate workflow, the audit trail is the product. A model that reasons in opaque chains and produces correct answers is less valuable than a model that follows a known sequence and produces deterministic, auditable ones. _(See [`backend/src/agent.py`](https://github.com/yakyetilabs/trade-agent/blob/main/backend/src/agent.py).)_
 
 **Memory.** Three explicit layers, with strict scope boundaries:
 
 - **In-session:** The current conversation context, discarded at session end.
 - **Per-vendor retrieval scope:** The resolved `vendor_id` constrains every tool call. There is no shared embedding store that mixes trade secrets across completely different vendor accounts.
-- **Procedural:** None in this MVP. Reusable response templates are deferred — see Section 10.
+- **Procedural:** None in this MVP. Reusable response templates are deferred - see Section 10.
 
 **Safety.** Safety is architected into the surrounding system, not the model. The model is never trusted to enforce a constraint that has a real cost when violated. Section 5 details the layers. The single most important commitment: the agent cannot transmit anything externally. Outbound clearance submission is always a human action.
 
@@ -64,13 +64,13 @@ This definition also rules things out. A linear RAG pipeline that retrieves text
 
 ## 3. Build / Buy / Stack Posture
 
-The MIT program frames every agentic stack as a choice at three layers — model, framework, platform — with three options at each: build, buy, or stack a combination. The posture I committed to for this project:
+The MIT program frames every agentic stack as a choice at three layers - model, framework, platform - with three options at each: build, buy, or stack a combination. The posture I committed to for this project:
 
 **Model layer: Buy.** Gemini 2.5 Flash (`gemini-2.5-flash`, GA) via Vertex AI as the primary model for rapid tool calling and generation speed, with Gemini 2.5 Pro (`gemini-2.5-pro`, GA) as the evaluation comparison. I rejected building (computationally absurd at portfolio scale) and rejected complex multi-provider abstraction layers. Vertex AI gives me enterprise terms (zero data retention, regional data residency) without bespoke compliance overhead.
 
-**Framework layer: Stack.** LangGraph (Python) as the orchestration runtime, with custom middleware for the parts standard libraries don't handle: vendor resolution, deterministic pre-model guards, and structured trace logging. I rejected a fully managed, black-box agent platform because it abstracts away the exact governance layers I want to control — vendor scoping, tool permissioning, and deterministic pre-model checks.
+**Framework layer: Stack.** LangGraph (Python) as the orchestration runtime, with custom middleware for the parts standard libraries don't handle: vendor resolution, deterministic pre-model guards, and structured trace logging. I rejected a fully managed, black-box agent platform because it abstracts away the exact governance layers I want to control - vendor scoping, tool permissioning, and deterministic pre-model checks.
 
-**Platform layer: Stack.** Off-the-shelf infrastructure for non-differentiating concerns — Cloud Run for serverless execution, Pinecone for vector search, Google Cloud Firestore for state tracking, and GCP Cloud Logging for infrastructure telemetry. Custom code for the control plane: the agent loop, the tool implementations, the scoping dependencies, and the trace store. The general principle: **buy the commodity, build the moat.** For an enterprise deployment of this same workflow, the moat is the governance layer, not the raw foundation model.
+**Platform layer: Stack.** Off-the-shelf infrastructure for non-differentiating concerns - Cloud Run for serverless execution, Pinecone for vector search, Google Cloud Firestore for state tracking, and GCP Cloud Logging for infrastructure telemetry. Custom code for the control plane: the agent loop, the tool implementations, the scoping dependencies, and the trace store. The general principle: **buy the commodity, build the moat.** For an enterprise deployment of this same workflow, the moat is the governance layer, not the raw foundation model.
 
 ---
 
@@ -90,18 +90,18 @@ The third row is the architectural commitment that matters most. The agent's aut
 
 ---
 
-## 5. Four Safeguard Layers — and Which Two Are Shipped
+## 5. Four Safeguard Layers - and Which Two Are Shipped
 
 The MIT program's safeguard framework names four layers: input filtering, deterministic policy checks, human-in-the-loop handoff, and an external audit monitor. The honest scope of this MVP is two layers fully implemented and two layers documented but not built.
 
 **Shipped: Deterministic vendor scoping.** The `vendor_id` the analyst selects is pattern-validated at the API edge (a malformed id is a 422 before any orchestration), then bound into every tool through LangGraph's typed runtime context (`ToolRuntime`), never as a model-facing argument: the tool signature has no vendor parameter, so a prompt injection like "show me shipping logs for vendor 9999" has no slot to land in. A companion pre-model guard (below) refuses inquiries that reference another vendor's entities by ID. _(See [`backend/src/app.py`](https://github.com/yakyetilabs/trade-agent/blob/main/backend/src/app.py) and [`backend/src/tools/lookup_shipment_manifest.py`](https://github.com/yakyetilabs/trade-agent/blob/main/backend/src/tools/lookup_shipment_manifest.py).)_
 _Amended by the public-demo pivot (§11): an identity layer previously fronted this scoping - a Firebase-verified email checked against an in-memory allowlist that also carried each analyst's authorized vendor set (`security.py`). That layer was removed when the demo went public; the vendor binding and the guards below are auth-independent and unchanged._
 
-**Considered: edge authorization via Cloud Run IAP.** Identity-Aware Proxy can now be enabled directly on Cloud Run — no load balancer, no added cost — and would reject unauthorized callers at Google's edge before the container runs. I evaluated it and kept the app-layer boundary deliberately: it kept the public frontend viewable rather than behind a Google login wall, and done securely IAP still requires verifying the signed assertion (the raw `run.app` URL can otherwise be hit directly). The credit/quota-drain risk — the real threat for a metered-AI demo — is handled in-app before any Vertex or Firestore call (originally the in-memory allowlist; since the §11 pivot, the in-memory per-IP rate limiter plus the infra spend ceilings); IAP's remaining advantage is DoS hygiene on the thin outer layer, which this demo's traffic profile does not need. IAP remains the obvious production-hardening step if that changes.
+**Considered: edge authorization via Cloud Run IAP.** Identity-Aware Proxy can now be enabled directly on Cloud Run - no load balancer, no added cost - and would reject unauthorized callers at Google's edge before the container runs. I evaluated it and kept the app-layer boundary deliberately: it kept the public frontend viewable rather than behind a Google login wall, and done securely IAP still requires verifying the signed assertion (the raw `run.app` URL can otherwise be hit directly). The credit/quota-drain risk - the real threat for a metered-AI demo - is handled in-app before any Vertex or Firestore call (originally the in-memory allowlist; since the §11 pivot, the in-memory per-IP rate limiter plus the infra spend ceilings); IAP's remaining advantage is DoS hygiene on the thin outer layer, which this demo's traffic profile does not need. IAP remains the obvious production-hardening step if that changes.
 
 **Shipped: Draft-only output with mandatory human handoff.** There is no tool that sends messages or changes manifest data. The `draft_clearance_response` tool writes to a database review queue (`trade-agent-AgentTraces` inside Firestore). A human reviewer must explicitly read, approve, or edit the draft in the UI. _(See [`backend/src/tools/draft_clearance_response.py`](https://github.com/yakyetilabs/trade-agent/blob/main/backend/src/tools/draft_clearance_response.py).)_
 
-**Documented, not shipped: Deterministic policy engine.** A production version would intercept every draft and run rule-based regex checks — looking for prohibited trade claims, format validation, and citation integrity — before the draft hits the human review queue. The MVP currently relies on system-prompt instruction sets for these checks.
+**Documented, not shipped: Deterministic policy engine.** A production version would intercept every draft and run rule-based regex checks - looking for prohibited trade claims, format validation, and citation integrity - before the draft hits the human review queue. The MVP currently relies on system-prompt instruction sets for these checks.
 
 **Documented, not shipped: External audit monitor.** A second, asynchronous LLM-based reviewer that samples agent decisions out-of-band and flags compliance anomalies.
 
@@ -115,7 +115,7 @@ _Amended by the public-demo pivot (§11): an identity layer previously fronted t
 
 Continuous evaluation as a first-class deployment concern separates AgentOps from basic infrastructure monitoring. Three commitments in this codebase:
 
-- **Real-time metric 1: Confidence-band approval rate.** For every classification, the agent's confidence score is logged alongside the eventual human review outcome (approve / edit / reject). A regression in the $0.95+$ band is a critical signal—it means the agent is confidently wrong about a custom regulation.
+- **Real-time metric 1: Confidence-band approval rate.** For every classification, the agent's confidence score is logged alongside the eventual human review outcome (approve / edit / reject). A regression in the $0.95+$ band is a critical signal-it means the agent is confidently wrong about a custom regulation.
 - **Real-time metric 2: Vendor-scope integrity.** Two scope signals are emitted and expected to stay at zero. Before the model runs, the cross-vendor guard refuses any inquiry that references another vendor's entities by ID (`cross_vendor_refusal`). Inside the loop, `lookup_shipment_manifest` records `scope_violation=true` with the `attempted_vendor_id` if a by-id lookup ever resolves a shipment owned by another vendor. Both are greppable Cloud Logging events; a non-zero rate is a critical alert. (The pre-pivot 403 `scope_violation` signal at the API boundary went away with the identity layer; see §11.)
 - **Periodic review: Eval suite against the deployed agent.** A curated evaluation dataset sitting at `backend/eval/cases.json` exercises the system across 4 capability categories - happy path (the full grounded pipeline, including two grounding traps), exact HTS fetch (the deterministic retrieval mode), escalation triggers, and scope violations (the two pre-model guards) - with 12 hand-picked cases, 3 per category. Each case's rationale documents the property it proves and why it earned its slot; a small suite where every case is load-bearing is a stronger signal than volume. Each run evaluates the production primary model against its eval-ladder counterpart (whatever `backend/src/config.py` currently pins - Claude Haiku 4.5 vs Claude Sonnet 4.5 as of this edit), outputting cost/accuracy matrices to justify the production layout choice.
 
@@ -125,7 +125,7 @@ Continuous evaluation as a first-class deployment concern separates AgentOps fro
 
 The MIT program's autonomy dial names five settings: Advisory, Supervised, Delegated, Independent, Autonomous. This MVP sits firmly at **Supervised**: the agent proposes, the human disposes. Every single generated clearance response is manually reviewed.
 
-The promotion path to **Delegated** — where the agent can automatically release a defined, low-risk slice of logs (e.g., standard HTS code lookups with confidence $\ge 0.92$) without per-case manual review — is an evidence-based engineering decision, gated by two clear conditions:
+The promotion path to **Delegated** - where the agent can automatically release a defined, low-risk slice of logs (e.g., standard HTS code lookups with confidence $\ge 0.92$) without per-case manual review - is an evidence-based engineering decision, gated by two clear conditions:
 
 1. Confidence-band approval rate exceeds $95\%$ in the $0.85+$ band across a statistically significant sample of reviewed historical drafts.
 2. Zero tool-call integrity anomalies over that identical operational window.

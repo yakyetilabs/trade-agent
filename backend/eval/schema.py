@@ -7,8 +7,8 @@ escalation reason, injected intents, tool-call count) so guard/scope/escalation 
 score identically across models; the model-dependent signals (cited ids, draft phrasing)
 are the quality axis the Flash-vs-Pro comparison actually measures.
 
-Grounding — that every cited shipment id is a real generated shipment owned by the
-case's vendor — is enforced by the co-located ``test_schema.py`` against the synthetic
+Grounding - that every cited shipment id is a real generated shipment owned by the
+case's vendor - is enforced by the co-located ``test_schema.py`` against the synthetic
 generators, so the suite can never drift from the seed data.
 """
 
@@ -52,7 +52,7 @@ class Expect(BaseModel):
     classification_present: bool | None = None
     tools_called: tuple[str, ...] = ()  # all of these tool names must appear
     tools_absent: tuple[str, ...] = ()  # none of these may appear
-    max_tool_calls: int | None = None  # e.g. 0 — model never ran (guard short-circuit)
+    max_tool_calls: int | None = None  # e.g. 0 - model never ran (guard short-circuit)
     cited_shipment_ids: tuple[str, ...] = ()  # all must appear in the draft (grounding)
     draft_includes: tuple[str, ...] = ()  # all must appear
     draft_includes_any: tuple[str, ...] = ()  # at least one must appear
@@ -69,7 +69,7 @@ class EvalCase(BaseModel):
     category: EvalCategory
     vendor_id: str
     inquiry: str
-    rationale: str  # why this case exists / what it proves — doubles as showcase narrative
+    rationale: str  # why this case exists / what it proves - doubles as showcase narrative
     expect: Expect
 
 

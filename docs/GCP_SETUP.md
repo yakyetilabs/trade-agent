@@ -1,16 +1,16 @@
-# GCP & Pinecone Setup — Manual Runbook
+# GCP & Pinecone Setup - Manual Runbook
 
-This is the step-by-step manual setup for the `trade-agent` stack. Per the project's IaC posture — a
-deliberate design decision to ship with **no managed IaC** for the initial build — there is **no
+This is the step-by-step manual setup for the `trade-agent` stack. Per the project's IaC posture - a
+deliberate design decision to ship with **no managed IaC** for the initial build - there is **no
 Terraform**: console setup plus single-line CLI deploy scripts only.
 
-Everything lives in **one** project — `trade-agent-ff12a`. A Firebase project *is* a GCP project,
+Everything lives in **one** project - `trade-agent-ff12a`. A Firebase project *is* a GCP project,
 so Firebase Auth, Firestore, Cloud Run, and Firebase Hosting all share it. This is what makes the
 Firebase ID-token audience (`= <project-id>`) line up with the backend verifier.
 
 > 💸 **Budget reminder.** The fixed + idle footprint is $0 (Cloud Run scale-to-zero, Firestore/Auth/
 > Hosting free tiers, Pinecone Starter). Vertex AI inference + embeddings are usage-metered, funded by
-> the $200 GCP trial credits — cents at demo volume. This is the project's documented budget posture.
+> the $200 GCP trial credits - cents at demo volume. This is the project's documented budget posture.
 
 ---
 
@@ -41,7 +41,7 @@ Conventions used below:
 
 > ✅ **Already done via Firebase.** This project was created by adding Firebase (Step 3) with display
 > name `trade-agent`; Firebase provisioned the underlying GCP project with ID `trade-agent-ff12a`. The
-> steps below are the reference equivalent — you do **not** need to re-create the project.
+> steps below are the reference equivalent - you do **not** need to re-create the project.
 
 **Console:** https://console.cloud.google.com → project picker → **New Project** → display name `trade-agent`
 (the resulting ID is `trade-agent-ff12a`). Then **Billing** → link your billing account (the trial credits
@@ -75,13 +75,13 @@ gcloud services enable \
   --project=trade-agent-ff12a
 ```
 
-- `run` — Cloud Run (backend container)
-- `aiplatform` — Vertex AI (Gemini 2.5 Flash/Pro + `gemini-embedding-001`)
-- `firestore` — state + audit store
-- `artifactregistry` — container image storage (Container Registry / `gcr.io` is retired; use Artifact Registry)
-- `cloudbuild` — image build during `gcloud run deploy --source`
-- `identitytoolkit` — Firebase Authentication backend
-- `secretmanager` — the Pinecone API key at runtime, mounted into Cloud Run via `--set-secrets` (see §9)
+- `run` - Cloud Run (backend container)
+- `aiplatform` - Vertex AI (Gemini 2.5 Flash/Pro + `gemini-embedding-001`)
+- `firestore` - state + audit store
+- `artifactregistry` - container image storage (Container Registry / `gcr.io` is retired; use Artifact Registry)
+- `cloudbuild` - image build during `gcloud run deploy --source`
+- `identitytoolkit` - Firebase Authentication backend
+- `secretmanager` - the Pinecone API key at runtime, mounted into Cloud Run via `--set-secrets` (see §9)
 
 ---
 
@@ -116,7 +116,7 @@ makes the console navigable):
 - `trade-agent-Shipments`
 - `trade-agent-AgentTraces`
 
-**Security rules:** the frontend never talks to Firestore directly — all reads/writes go through the
+**Security rules:** the frontend never talks to Firestore directly - all reads/writes go through the
 FastAPI backend using the service account. Lock client access down:
 
 ```
@@ -166,7 +166,7 @@ gcloud projects add-iam-policy-binding trade-agent-ff12a \
 > The public-demo pivot removed the auth layer, so that grant is no longer needed and can be revoked.
 
 > The `logging.viewer` grant is the deliberately-not-least-privilege bit called out in
-> `DESIGN_DECISIONS.md` §8 — minor logging read for rapid operator debugging.
+> `DESIGN_DECISIONS.md` §8 - minor logging read for rapid operator debugging.
 
 ### 5a. Local development credentials
 
@@ -174,10 +174,10 @@ Cloud Run uses the attached service account automatically (no key needed in prod
 dev**, the backend authenticates via Application Default Credentials (`gcp/client.py` uses
 `ApplicationDefault()`), so pick **one**:
 
-- **Method A — gcloud ADC (recommended, no key file):** install the gcloud CLI and run
+- **Method A - gcloud ADC (recommended, no key file):** install the gcloud CLI and run
   `gcloud auth application-default login`. The SDK auto-detects the short-lived credentials it stores;
   nothing is downloaded and nothing can leak to git. Leave `GOOGLE_APPLICATION_CREDENTIALS` unset.
-- **Method B — downloaded service-account key:** **Console:** the service account → **Keys → Add key →
+- **Method B - downloaded service-account key:** **Console:** the service account → **Keys → Add key →
   JSON**, saved as `backend/trade-agent-sa-key.json`, then point `GOOGLE_APPLICATION_CREDENTIALS` at it
   (Step 8). Use this if you prefer a dedicated SA identity or don't want the gcloud CLI locally.
 
@@ -205,7 +205,7 @@ The backend image will be pushed to
 
 ## 7. Pinecone index (knowledge base)
 
-Done in the Pinecone console (https://app.pinecone.io) — independent of GCP.
+Done in the Pinecone console (https://app.pinecone.io) - independent of GCP.
 
 - **Name:** `trade-agent-hts-kb`
 - **Dimension:** **768** (must match `gemini-embedding-001` called with `output_dimensionality=768`; the
@@ -238,7 +238,7 @@ VERTEX_EMBEDDING_DIM=768
 PINECONE_API_KEY=pc-xxxxxxxxxxxxxxxxxxxx
 PINECONE_INDEX=trade-agent-hts-kb
 
-# Local dev only — Cloud Run uses the attached SA instead. Either point this at a downloaded key
+# Local dev only - Cloud Run uses the attached SA instead. Either point this at a downloaded key
 # (Step 5a Method B), or leave it unset and use `gcloud auth application-default login` (Method A).
 GOOGLE_APPLICATION_CREDENTIALS=./trade-agent-sa-key.json
 
@@ -259,7 +259,7 @@ usually right: dev uses the same-origin `/api` (Vite proxy), production bakes th
 
 ---
 
-## 9. Deploy targets (reference — scripts come in later phases)
+## 9. Deploy targets (reference - scripts come in later phases)
 
 ### Backend → Cloud Run
 

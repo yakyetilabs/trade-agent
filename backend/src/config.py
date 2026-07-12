@@ -2,7 +2,7 @@
 
 Environment variables are read here exactly once at import time and re-exported as
 typed, immutable constants. No other module in the application may call
-``os.environ`` / ``os.getenv`` — import the constants from here instead.
+``os.environ`` / ``os.getenv`` - import the constants from here instead.
 
 The small pure helper (``resolve_cors_origins``) keeps the parsing logic
 unit-testable without mutating process environment state.
@@ -62,7 +62,7 @@ RATE_LIMIT_RPM: Final[int] = int(os.getenv("RATE_LIMIT_RPM", "30"))
 RATE_LIMIT_TPM: Final[int] = int(os.getenv("RATE_LIMIT_TPM", "30000"))
 RATE_LIMIT_WINDOW_SECONDS: Final[float] = float(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 
-# Firestore collection names — fixed, not env-tunable. They carry the mandatory
+# Firestore collection names - fixed, not env-tunable. They carry the mandatory
 # ``trade-agent-`` isolation prefix and are the single source for collection ids.
 FIRESTORE_VENDORS_COLLECTION: Final[str] = "trade-agent-Vendors"
 FIRESTORE_SHIPMENTS_COLLECTION: Final[str] = "trade-agent-Shipments"

@@ -9,7 +9,7 @@ never invoked.
 - A directly named *foreign vendor id* fails immediately (no lookup needed).
 - A *shipment id* is verified against Firestore ownership via the injected
   ``owner_lookup`` (so the guard stays unit-testable without a live client). A
-  shipment that does not exist is not a violation — the scoped lookup tool will
+  shipment that does not exist is not a violation - the scoped lookup tool will
   simply return nothing.
 """
 
@@ -17,7 +17,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
-# Scan patterns (unanchored, case-insensitive) — distinct from the anchored
+# Scan patterns (unanchored, case-insensitive) - distinct from the anchored
 # full-string validation patterns on the models.
 _VENDOR_REF = re.compile(r"\bV-\d{3,}\b", re.IGNORECASE)
 _SHIPMENT_REF = re.compile(r"\bS-\d{4,}\b", re.IGNORECASE)
