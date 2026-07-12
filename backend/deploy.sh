@@ -30,11 +30,11 @@ MAX_INSTANCES="${MAX_INSTANCES:-2}"
 TIMEOUT="${TIMEOUT:-300}"
 
 # The CORS allow-list: every browser origin the frontend is served from. Split-origin
-# deploy (docs/DESIGN_DECISIONS.md §9) - the frontend calls the api. subdomain from at
-# least three hosts (the custom domain + Firebase's two default hostnames), each a
-# distinct browser origin under the CORS spec. Override with a comma-separated list if
-# adding more hostnames; the compiled default below matches the current live deploy.
-PROD_FRONTEND_ORIGINS="${PROD_FRONTEND_ORIGINS:-https://trade-agent.samir.codes,https://trade-agent-ff12a.web.app,https://trade-agent-ff12a.firebaseapp.com}"
+# deploy (docs/DESIGN_DECISIONS.md §9) - the frontend calls the api. subdomain from the
+# custom domain plus Firebase's two default hostnames, each a distinct browser origin
+# under the CORS spec. The old trade-agent.samir.codes origin stays allowlisted during
+# the rebrand cutover; drop it once the tradeops-ai domain is verified live.
+PROD_FRONTEND_ORIGINS="${PROD_FRONTEND_ORIGINS:-https://tradeops-ai.samir.codes,https://trade-agent.samir.codes,https://trade-agent-ff12a.web.app,https://trade-agent-ff12a.firebaseapp.com}"
 
 # --- Preflight: fail fast, and NEVER block on a prompt --------------------------------------
 # --quiet disables interactive prompts so a not-yet-enabled API can't leave the script hanging

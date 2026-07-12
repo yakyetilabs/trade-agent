@@ -30,7 +30,7 @@ from src.models import VENDOR_ID_PATTERN, AgentTrace, TraceDisposition, Vendor
 from src.ratelimit import RateLimitDecision, rate_limiter, resolve_client_ip
 from src.streaming import DoneEvent, sse_format, stream_agent_run
 
-app = FastAPI(title="trade-agent backend", version="0.1.0")
+app = FastAPI(title="TradeOps AI backend", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,

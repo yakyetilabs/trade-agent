@@ -38,7 +38,7 @@ function renderTopBar() {
 describe("TopBar", () => {
   it("renders the shell chrome: brand, nav, and the synthetic pill", () => {
     renderTopBar();
-    expect(screen.getByText("trade-agent")).toBeInTheDocument();
+    expect(screen.getByText("TradeOps AI")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Console" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: "Audit Trail" })).toHaveAttribute("href", "/traces");
     expect(screen.getByText("Synthetic data")).toBeInTheDocument();
