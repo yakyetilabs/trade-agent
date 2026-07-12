@@ -1,7 +1,7 @@
 /**
  * Draft citation tokenizer. Splits the model's grounded draft into plain text and the two kinds of
- * cited identifier the Console renders as monospace chips: HTS codes and shipment ids
- * (docs/FRONTEND_PLAN.md, Console spec). Pure and framework-free so it is unit-tested directly.
+ * cited identifier the Console renders as monospace chips: HTS codes and shipment ids. Pure and
+ * framework-free so it is unit-tested directly.
  */
 
 export type CitationKind = "text" | "hts" | "shipment";

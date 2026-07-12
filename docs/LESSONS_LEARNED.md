@@ -123,7 +123,7 @@ This is a living document; keep appending as the deploy phase continues.
 - Cloud CLI defaults, precedence rules, and console navigation drift continuously.
   Two concrete hits from this project alone: confirming that `gcloud run deploy --source` actually prefers a Dockerfile over buildpacks (verified against current docs rather than assumed), and a cloud console having moved a settings page (Authentication) under a different top-level menu (Security) than where older documentation and habit expected it.
 - The cost of skipping verification is usually a silently wrong assumption, not a loud error.
-  Assuming buildpacks were the "cheaper" choice here would have been wrong: both build on the same free-tier build service, so the assumption would have driven a worse decision without ever surfacing as a bug.
+  Assuming buildpacks were the "cheaper" choice here would have been wrong: both build on the same Cloud Build service with no cost delta, so the assumption would have driven a worse decision without ever surfacing as a bug.
 - Practice: before writing infrastructure code or handing over a command, pull the current official doc page rather than relying on trained memory, especially for anything involving pricing, defaults, or precedence between two mechanisms.
 
 ## Verify what is deployed, not just what is committed

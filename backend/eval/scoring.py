@@ -1,6 +1,6 @@
 """Deterministic scorer: an :class:`~src.agent.AgentResult` against an ``EvalCase``.
 
-Pure functions, no I/O — every assertion is a boolean check over the result, so a case's
+Pure functions, no I/O - every assertion is a boolean check over the result, so a case's
 score is fully reproducible given the agent output. This is the test seam: the harness
 tests exercise ``score_case`` with synthetic results and never touch a model.
 """

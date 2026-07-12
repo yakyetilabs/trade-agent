@@ -1,7 +1,7 @@
 """Tool 1: classify_import_restriction (hybrid classifier).
 
-Runs first. Classifies the analyst's *intent* for routing and — only when the
-inquiry describes goods whose HTS code is missing/vague/disputed — additionally
+Runs first. Classifies the analyst's *intent* for routing and - only when the
+inquiry describes goods whose HTS code is missing/vague/disputed - additionally
 proposes an HTS heading and restriction band with a calibrated confidence. The
 *authoritative* restriction for an already-declared code comes from the
 deterministic catalog join in ``lookup_shipment_manifest``; these proposal
@@ -39,12 +39,12 @@ sentences of reasoning.
 Only if the inquiry describes specific goods whose HTS code is missing, vague, or disputed,
 additionally propose the most likely HTS heading (proposed_hts_heading) and its restriction band
 (restriction_band). If the inquiry already cites an HTS code, or does not describe goods to
-classify, leave those two fields null — the authoritative restriction comes from the manifest
+classify, leave those two fields null - the authoritative restriction comes from the manifest
 lookup, not from you."""
 
 
 class _ClassifierOutput(BaseModel):
-    """Structured-output schema for the LLM — constrained to the four routing intents."""
+    """Structured-output schema for the LLM - constrained to the four routing intents."""
 
     intent: Literal[
         "tariff_lookup", "manifest_flag_resolution", "clearance_requirements", "unknown"
@@ -58,7 +58,7 @@ class _ClassifierOutput(BaseModel):
 
 
 def _classify_once(inquiry: str, model_id: str | None) -> _ClassifierOutput:
-    """Single structured Vertex call — the test seam for this tool.
+    """Single structured Vertex call - the test seam for this tool.
 
     Built from the shared provider seam; ``with_structured_output`` constrains the model to
     the four routing intents. A router wants cheap, deterministic output, which the seam's

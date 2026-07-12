@@ -48,11 +48,13 @@ node_modules/
 *key*.json
 *credentials*.json
 
-# Local agent/tooling config — kept local, never committed
+# Local agent/tooling config - kept local, never committed
 CLAUDE.md
 CLAUDE.local.md
 # Detailed session history moved off CLAUDE.local.md's auto-load path
 SESSION_ARCHIVE.local.md
 # Forward implementation-plan handoffs, kept local (opened on purpose, not auto-loaded)
 PIVOT_PLAN.local.md
+# Domain cutover runbook, kept local (opened on purpose, not auto-loaded)
+CUTOVER_RUNBOOK.local.md
 .claude/

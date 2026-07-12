@@ -3,7 +3,7 @@
 Hermetic by construction: the model is never built or called. ``build_agent`` is
 replaced with a fake whose ``invoke`` appends tool calls to the ambient trace via the
 same ``record_tool_call`` seam the real tools use, so the orchestrator's extraction,
-fallback, and trace-persistence logic is exercised exactly as it would be live — with
+fallback, and trace-persistence logic is exercised exactly as it would be live - with
 no Vertex, Pinecone, Firestore, or credentials in the loop.
 """
 

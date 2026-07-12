@@ -66,7 +66,7 @@ _VENDORS: tuple[Vendor, ...] = (
 
 # --- Curated HTS clause catalog (the shared, non-vendor-partitioned KB) ---------
 _HTS_CLAUSES: tuple[HtsClause, ...] = (
-    # Electronics — Chapters 84 / 85
+    # Electronics - Chapters 84 / 85
     HtsClause(
         hts_code="8471.30.0100",
         chapter=84,
@@ -140,7 +140,7 @@ _HTS_CLAUSES: tuple[HtsClause, ...] = (
             "release."
         ),
     ),
-    # Textiles — Chapters 52 / 61 / 62 / 64
+    # Textiles - Chapters 52 / 61 / 62 / 64
     HtsClause(
         hts_code="6109.10.0012",
         chapter=61,
@@ -195,7 +195,7 @@ _HTS_CLAUSES: tuple[HtsClause, ...] = (
             "covering the ankle. Standard dutiable consumer goods."
         ),
     ),
-    # Agriculture — Chapters 02 / 08 / 09 / 16 / 20
+    # Agriculture - Chapters 02 / 08 / 09 / 16 / 20
     HtsClause(
         hts_code="0901.21.0030",
         chapter=9,
@@ -265,7 +265,7 @@ _HTS_CLAUSES: tuple[HtsClause, ...] = (
         ),
         notes="Tariff-rate quota: confirm in-quota vs. over-quota rate at entry.",
     ),
-    # Machinery — Chapter 84
+    # Machinery - Chapter 84
     HtsClause(
         hts_code="8479.89.9499",
         chapter=84,
@@ -323,7 +323,7 @@ _HTS_CLAUSES: tuple[HtsClause, ...] = (
         ),
         notes="High-spec separators are nonproliferation-controlled; license required.",
     ),
-    # Pharmaceuticals — Chapter 30 / 29
+    # Pharmaceuticals - Chapter 30 / 29
     HtsClause(
         hts_code="3004.90.9228",
         chapter=30,
@@ -367,7 +367,7 @@ _HTS_CLAUSES: tuple[HtsClause, ...] = (
             "required before clearance."
         ),
     ),
-    # Chemicals — Chapter 28 / 29
+    # Chemicals - Chapter 28 / 29
     HtsClause(
         hts_code="2811.19.6090",
         chapter=28,
@@ -404,7 +404,7 @@ _HTS_CLAUSES: tuple[HtsClause, ...] = (
         duty_rate="Free",
         restriction=RestrictionLevel.PROHIBITED,
         description=(
-            "Ephedrine and its salts — a regulated List I chemical precursor. Not "
+            "Ephedrine and its salts - a regulated List I chemical precursor. Not "
             "admissible without a valid DEA importer registration and an approved "
             "import permit; absent authorization the entry is refused."
         ),

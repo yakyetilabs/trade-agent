@@ -38,7 +38,7 @@ export function AppLogo({ markOnly = false, className }: AppLogoProps) {
       {markOnly ? null : (
         <span className="flex flex-col leading-none">
           <span className="font-mono text-[15px] font-semibold tracking-tight text-fg">
-            trade-agent
+            TradeOps AI
           </span>
           <span className="mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-fg-subtle">
             Analyst Console

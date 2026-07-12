@@ -2,8 +2,8 @@
 
 /* The dark "AgentOps" theme. These @theme tokens become Tailwind utilities
    (--color-surface -> bg-surface/text-surface/border-surface, --font-mono -> font-mono,
-   --ease-out-soft -> ease-out-soft). Palette, type, and motion are specified in
-   docs/FRONTEND_PLAN.md ("The dark AgentOps theme"). */
+   --ease-out-soft -> ease-out-soft). Palette, type, and motion are defined in the
+   @theme block below. */
 @theme {
   /* Ink scale - backgrounds, back to front */
   --color-ink: #0b0e15;

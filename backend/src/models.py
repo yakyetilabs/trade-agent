@@ -7,7 +7,7 @@ Three domains back the persistence layer:
 - ``HtsClause`` -> Pinecone ``trade-agent-hts-kb``     (vector id = ``hts_code``)
 
 All three are populated exclusively from the synthetic generators in
-``src/data/generators.py`` — there is no real trade data anywhere in this repo.
+``src/data/generators.py`` - there is no real trade data anywhere in this repo.
 
 The models are ``frozen`` because these records are immutable reference/seed data:
 generated once, written to a store, and read back. Firestore and the Pinecone
@@ -43,7 +43,7 @@ class RestrictionLevel(StrEnum):
 
     ``classify_import_restriction`` (Phase 3) maps a manifest line to one of these
     by joining on the line's HTS code. ``PROHIBITED`` here means *not admissible
-    without a specific exception* — it is distinct from the pre-agent escalation
+    without a specific exception* - it is distinct from the pre-agent escalation
     guard, which intercepts contraband / sanctions signals before the model runs.
     """
 
@@ -108,7 +108,7 @@ class Shipment(BaseModel):
 
 
 class HtsClause(BaseModel):
-    """A Harmonized Tariff Schedule clause — one record in the shared KB.
+    """A Harmonized Tariff Schedule clause - one record in the shared KB.
 
     The KB is public HTS reference text, so it is intentionally *not*
     vendor-partitioned (see CLAUDE.md / Pinecone notes). ``page_content`` is the
@@ -131,7 +131,7 @@ class HtsClause(BaseModel):
     def page_content(self) -> str:
         """Render the human-readable clause text used as the embedding input."""
         lines: list[str] = [
-            f"HTS {self.hts_code} — {self.title}",
+            f"HTS {self.hts_code} - {self.title}",
             f"Chapter {self.chapter}: {self.heading}",
             f"Category: {self.category.value}. Duty rate: {self.duty_rate}. "
             f"Restriction: {self.restriction.value}.",
@@ -163,7 +163,7 @@ class HtsClause(BaseModel):
 class InquiryIntent(StrEnum):
     """The intent of an analyst inquiry.
 
-    The first four are *model-classifiable* — the classifier LLM may emit them.
+    The first four are *model-classifiable* - the classifier LLM may emit them.
     The last two are *system-injected* by the orchestrator/guards and must never
     be produced by the model (a deterministic guard sets ``cross_vendor_refusal``;
     the loop sets ``iteration_cap_exceeded`` on a no-draft fallback).
@@ -197,7 +197,7 @@ class ImportClassification(BaseModel):
     missing/vague/disputed, the classifier may also propose ``proposed_hts_heading``
     and a ``restriction_band`` with a calibrated ``confidence``. The *authoritative*
     band for an already-declared code still comes from the deterministic catalog
-    join in ``lookup_shipment_manifest`` — these proposal fields are advisory.
+    join in ``lookup_shipment_manifest`` - these proposal fields are advisory.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -230,7 +230,7 @@ class AgentTrace(BaseModel):
     """The single audit document written per agent run.
 
     One document per run (doc id = ``trace_id``) with every tool call embedded in
-    ``tool_calls`` — the granular audit trail the project commits to, recorded as
+    ``tool_calls`` - the granular audit trail the project commits to, recorded as
     one atomic record rather than a document per call.
     """
 

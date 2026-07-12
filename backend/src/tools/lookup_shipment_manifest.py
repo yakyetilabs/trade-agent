@@ -1,17 +1,17 @@
 """Tool 2: lookup_shipment_manifest (vendor-scoped).
 
 The only authority for which shipments this tool returns is the ``vendor_id`` in
-the runtime context — the model-facing schema has no vendor argument, so a
+the runtime context - the model-facing schema has no vendor argument, so a
 prompt-injection payload cannot redirect the lookup.
 
 Scope-violation audit in a single read: because shipments are keyed by their
 globally unique id with ``vendor_id`` as a field, a by-id lookup fetches the
 document once and compares the owner. A foreign shipment returns an empty result
-*and* records ``scope_violation=true`` + ``attempted_vendor_id`` on the trace —
+*and* records ``scope_violation=true`` + ``attempted_vendor_id`` on the trace -
 the audit signal the AgentOps surface expects to stay at zero.
 
 Each returned manifest line is enriched by joining its declared ``hts_code`` to
-the in-process HTS catalog (the deterministic, authoritative restriction path —
+the in-process HTS catalog (the deterministic, authoritative restriction path -
 distinct from the semantic Pinecone retrieval in retrieve_tariff_regulation).
 """
 
@@ -106,7 +106,7 @@ def lookup_shipment_manifest(
     date_to: str | None = None,
 ) -> list[dict[str, object]]:
     """Look up shipments for the CURRENT vendor and return their manifests, each line enriched
-    with its HTS restriction details. You CANNOT specify a vendor — results are always scoped to
+    with its HTS restriction details. You CANNOT specify a vendor - results are always scoped to
     the authenticated vendor. Pass `shipment_id` to fetch one shipment, or use
     `status`/`date_from`/`date_to` (ISO dates) to list filtered shipments. Returns an empty list
     if nothing matches or the id is not this vendor's."""
