@@ -1,0 +1,38 @@
+# Dependabot version updates for TradeOps AI.
+# Ecosystem identifiers verified against the current GitHub docs (2026-07):
+#   - GitHub Actions        -> "github-actions" (directory "/" scans .github/workflows)
+#   - Backend Python (uv)   -> "pip" (Dependabot reads pyproject.toml + uv.lock natively)
+#   - Frontend JS (pnpm)     -> "npm" (the npm ecosystem handles pnpm-lock.yaml)
+#
+# Minor/patch bumps are grouped into a single PR per ecosystem to keep review noise low;
+# major bumps still arrive as individual PRs so a breaking change gets its own review.
+version: 2
+updates:
+  # Actions pinned in .github/workflows/ci.yml
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Backend dependencies (uv-managed, pip ecosystem)
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    groups:
+      backend-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Frontend dependencies (pnpm via the npm ecosystem)
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    groups:
+      frontend-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

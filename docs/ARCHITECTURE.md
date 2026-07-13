@@ -1,24 +1,24 @@
 # Architecture
 
 How TradeOps AI works, component by component.
-This document describes *what the system does and how*; the reasoning behind each choice, with the alternatives that were rejected, lives in [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md).
+This document describes _what the system does and how_; the reasoning behind each choice, with the alternatives that were rejected, lives in [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md).
 For who the user is and the workflow being modeled, see [PRODUCT.md](PRODUCT.md).
-For running and deploying it, see [setup.md](setup.md) and [GCP_SETUP.md](GCP_SETUP.md).
+For running and deploying it, see [SETUP.md](SETUP.md) and [GCP_SETUP.md](GCP_SETUP.md).
 
 One naming note up front: internal GCP resources (Firestore collections, the Cloud Run service, the Pinecone index, the service account) carry the project's original `trade-agent-` codename prefix, kept for account-level isolation.
 The product surfaces are TradeOps AI.
 
 ## Components at a glance
 
-| Component | Technology | Role |
-| --- | --- | --- |
-| Analyst console | React 18 + TypeScript + Tailwind, Firebase Hosting | Vendor scope picker, live pipeline view, draft review, audit trail |
-| API service | FastAPI (Python 3.12) on Cloud Run, scale-to-zero | Validation edge, rate-limit admission, sync + streaming inquiry endpoints |
-| Agent runtime | LangGraph (`langchain.agents.create_agent`) | Bounded tool-calling loop around the model |
-| Model | Gemini on Vertex AI, behind a provider seam | Reasoning, tool selection, drafting |
-| Knowledge base | Pinecone serverless index (768-dim) + an in-process catalog | HTS clause retrieval: semantic and exact |
-| Operational store | Cloud Firestore (Native mode) | Vendors, shipments, and one audit trace per run |
-| Spend containment | Cloud Run instance ceiling, Vertex quota, billing alert, in-app per-IP limiter | Bounded cost under public unauthenticated traffic |
+| Component         | Technology                                                                     | Role                                                                      |
+| ----------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| Analyst console   | React 18 + TypeScript + Tailwind, Firebase Hosting                             | Vendor scope picker, live pipeline view, draft review, audit trail        |
+| API service       | FastAPI (Python 3.12) on Cloud Run, scale-to-zero                              | Validation edge, rate-limit admission, sync + streaming inquiry endpoints |
+| Agent runtime     | LangGraph (`langchain.agents.create_agent`)                                    | Bounded tool-calling loop around the model                                |
+| Model             | Gemini on Vertex AI, behind a provider seam                                    | Reasoning, tool selection, drafting                                       |
+| Knowledge base    | Pinecone serverless index (768-dim) + an in-process catalog                    | HTS clause retrieval: semantic and exact                                  |
+| Operational store | Cloud Firestore (Native mode)                                                  | Vendors, shipments, and one audit trace per run                           |
+| Spend containment | Cloud Run instance ceiling, Vertex quota, billing alert, in-app per-IP limiter | Bounded cost under public unauthenticated traffic                         |
 
 ## The request lifecycle
 
@@ -31,7 +31,7 @@ Both inquiry endpoints drive the same pipeline, implemented once in [`backend/sr
    If either fires, the run short-circuits with a complete audit trace and the model is never invoked, so a guarded run costs zero model tokens.
 4. **Vendor resolution.** An unknown (well-formed but non-existent) vendor is a hard reject: 404 on the sync path, a terminal `error` event on the stream.
 5. **The agent loop.** A fresh tool-calling agent is built per run and invoked with the vendor scope bound into its typed runtime context, under a fixed iteration budget.
-6. **Trace assembly.** The classification and the draft are recovered from the *recorded tool calls*, not from free-form model text; if the loop ended without a grounded draft, a safe fallback draft is substituted and the run is marked `iteration_cap_exceeded`.
+6. **Trace assembly.** The classification and the draft are recovered from the _recorded tool calls_, not from free-form model text; if the loop ended without a grounded draft, a safe fallback draft is substituted and the run is marked `iteration_cap_exceeded`.
 7. **Persistence and response.** Exactly one `AgentTrace` document is written to Firestore, then projected to the lean `AgentResult` the API returns (or the stream's terminal `done` event carries).
 
 ## Deterministic boundaries
@@ -57,7 +57,7 @@ Four curated categories, matched deterministically (case-insensitive substrings 
 
 A match ends the run `escalated` with the matched category as a stable audit value, routed to a human queue.
 The rules are intentionally narrow: a false positive routes a legitimate inquiry away from the agent, so precision is preferred over recall here.
-Note the deliberate distinction: a *restricted import* (even a prohibited HTS band) is a routine compliance case the agent handles; escalation is reserved for criminal and security signals.
+Note the deliberate distinction: a _restricted import_ (even a prohibited HTS band) is a routine compliance case the agent handles; escalation is reserved for criminal and security signals.
 
 ### The cross-vendor guard
 
@@ -80,12 +80,12 @@ The loop is built with `langchain.agents.create_agent` (LangChain 1.0) in [`back
 
 ### The four tools
 
-| Tool | What it does | Reads | Writes | Scope enforcement |
-| --- | --- | --- | --- | --- |
-| `classify_import_restriction` | Routes the inquiry to an intent (+ an advisory HTS proposal with calibrated confidence) via a structured-output model call | The inquiry text | Nothing | Not data-scoped; produces routing metadata only |
-| `lookup_shipment_manifest` | Fetches the vendor's shipments and declared manifest lines, enriched with each line's restriction band from the catalog | Firestore shipments | Nothing | `vendor_id` from runtime context; no vendor parameter exists |
-| `retrieve_tariff_regulation` | Merges deterministic exact-code fetches with dense semantic search over the HTS knowledge base | In-process catalog + Pinecone | Nothing | The KB is public regulation text, intentionally not vendor-partitioned |
-| `draft_clearance_response` | Records the drafted response text for the orchestrator to persist | The loop's accumulated evidence | The review queue, via the run's audit trace, with `draft` status | Output-only; there is no outbound transmission tool |
+| Tool                          | What it does                                                                                                               | Reads                           | Writes                                                           | Scope enforcement                                                      |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `classify_import_restriction` | Routes the inquiry to an intent (+ an advisory HTS proposal with calibrated confidence) via a structured-output model call | The inquiry text                | Nothing                                                          | Not data-scoped; produces routing metadata only                        |
+| `lookup_shipment_manifest`    | Fetches the vendor's shipments and declared manifest lines, enriched with each line's restriction band from the catalog    | Firestore shipments             | Nothing                                                          | `vendor_id` from runtime context; no vendor parameter exists           |
+| `retrieve_tariff_regulation`  | Merges deterministic exact-code fetches with dense semantic search over the HTS knowledge base                             | In-process catalog + Pinecone   | Nothing                                                          | The KB is public regulation text, intentionally not vendor-partitioned |
+| `draft_clearance_response`    | Records the drafted response text for the orchestrator to persist                                                          | The loop's accumulated evidence | The review queue, via the run's audit trace, with `draft` status | Output-only; there is no outbound transmission tool                    |
 
 Every tool call appends `{tool_name, input, output, duration_ms, timestamp}` to the ambient trace context (a `ContextVar`), which both runners persist onto the single per-run audit document.
 
@@ -105,15 +105,15 @@ The same clauses deliberately live in two stores: in-process (what makes exact-f
 `POST /api/inquiry/stream` returns `text/event-stream` and is the console's live view ([`backend/src/streaming.py`](../backend/src/streaming.py)).
 The event vocabulary is the wire contract:
 
-| Event | Payload | Meaning |
-| --- | --- | --- |
-| `run_started` | `{trace_id, vendor_id, model}` | Always first |
+| Event                               | Payload                        | Meaning                                                                                                                                                 |
+| ----------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run_started`                       | `{trace_id, vendor_id, model}` | Always first                                                                                                                                            |
 | `stage_started` / `stage_completed` | `{stage}` / `{stage, summary}` | A tool began / finished; `summary` is the same compact projection recorded on the audit trace, so the live view can never diverge from the audit record |
-| `thinking_delta` | `{text}` | A fragment of the model's streamed reasoning (Gemini thinking), advisory |
-| `text_delta` | `{text}` | A fragment of the model's visible answer text, advisory |
-| `guard_triggered` | `{kind, reason}` | A deterministic guard fired; the model never ran |
-| `done` | `{result}` | Terminal success carrying the full `AgentResult`, guards included |
-| `error` | `{message}` | Terminal failure (unknown vendor, unexpected exception) |
+| `thinking_delta`                    | `{text}`                       | A fragment of the model's streamed reasoning (Gemini thinking), advisory                                                                                |
+| `text_delta`                        | `{text}`                       | A fragment of the model's visible answer text, advisory                                                                                                 |
+| `guard_triggered`                   | `{kind, reason}`               | A deterministic guard fired; the model never ran                                                                                                        |
+| `done`                              | `{result}`                     | Terminal success carrying the full `AgentResult`, guards included                                                                                       |
+| `error`                             | `{message}`                    | Terminal failure (unknown vendor, unexpected exception)                                                                                                 |
 
 Two details are load-bearing:
 
@@ -137,7 +137,7 @@ Two fields deserve a note:
 
 - `draft_actionable` gates the UI's Approve action.
   It is false when there is nothing to release: a cross-vendor refusal, the iteration-cap fallback, or a lookup that matched no shipment (the draft then honestly says so, and an analyst cannot "approve" a null result).
-- The token fields are the *billable* split: on Vertex, thinking bills at the output rate, so `output_tokens` folds in `thoughts_tokens` and `prompt + output == total` reconciles.
+- The token fields are the _billable_ split: on Vertex, thinking bills at the output rate, so `output_tokens` folds in `thoughts_tokens` and `prompt + output == total` reconciles.
   Token accounting reads langchain-core's provider-neutral `usage_metadata`, so it survives a provider swap.
 
 Disposition lifecycle: the agent only ever writes `draft` or `escalated`; only the human-review endpoint (`POST /api/traces/{trace_id}/disposition`) can set `approved` or `rejected`.
@@ -149,9 +149,9 @@ The demo is public and unauthenticated, so cost is bounded by three explicit lay
 
 1. **Infrastructure ceiling.** Cloud Run `max-instances=2` with `concurrency=1` multiplies to at most two agent runs in flight; a Vertex AI tokens-per-minute quota caps total burn; a billing budget alert backstops.
 2. **In-app per-IP limiter** ([`backend/src/ratelimit.py`](../backend/src/ratelimit.py)): one token-bucket core carrying two budgets per IP.
-   Every `/api/*` request reserves from a requests-per-minute budget; the two inquiry endpoints additionally debit a tokens-per-minute budget with each run's *actual* `total_tokens` after it finishes.
+   Every `/api/*` request reserves from a requests-per-minute budget; the two inquiry endpoints additionally debit a tokens-per-minute budget with each run's _actual_ `total_tokens` after it finishes.
    A run's cost is unknowable at admission, so the pre-check only refuses an already-exhausted budget; one request may overshoot and that IP then waits for refill, the standard debit-after semantics of commercial LLM APIs.
-   Callers are keyed by the *rightmost* `X-Forwarded-For` entry, the one Google's front end appends for the actually-connected peer; leading entries are caller-supplied and spoofable.
+   Callers are keyed by the _rightmost_ `X-Forwarded-For` entry, the one Google's front end appends for the actually-connected peer; leading entries are caller-supplied and spoofable.
    The store is in-memory, bounded (stale buckets evicted first, then least-recently-seen), and deliberately per-instance: it keeps database reads out of the admission path so hostile traffic cannot drain the Firestore read quota, and the documented scale-up seam is a shared store (e.g. Memorystore), not a redesign.
 3. **Per-request bounds.** The 4000-character input cap, the fixed iteration budget, and the pre-model guards.
 

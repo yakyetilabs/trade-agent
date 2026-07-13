@@ -26,16 +26,16 @@ Copy the template and fill it in:
 cp backend/.env.example backend/.env
 ```
 
-| Variable | What it is |
-| --- | --- |
-| `GCP_PROJECT` / `GCP_REGION` | Your GCP project id and region (Vertex AI + Firestore). |
-| `VERTEX_PRIMARY_MODEL` / `VERTEX_EVAL_MODEL` | The chat models for the agent loop and the eval comparison run. |
-| `VERTEX_EMBEDDING_MODEL` / `VERTEX_EMBEDDING_DIM` | The embedding model and dimension; must match the Pinecone index. |
-| `PINECONE_API_KEY` / `PINECONE_INDEX` | The knowledge-base index credentials. |
-| `RATE_LIMIT_RPM` / `RATE_LIMIT_TPM` / `RATE_LIMIT_WINDOW_SECONDS` | Per-IP limiter tuning; defaults are compiled into `src/config.py`, set these only to override. |
-| `APP_ENV` | `local` relaxes CORS to the Vite dev origin; `production` locks it to `PROD_FRONTEND_ORIGINS`. |
-| `PROD_FRONTEND_ORIGINS` | Comma-separated browser origins allowed by CORS in production. |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Local dev only: path to a service-account key with Firestore + Vertex roles. Omit it to fall back to your own ADC (`gcloud auth application-default login`). Cloud Run uses its attached service account instead. |
+| Variable                                                          | What it is                                                                                                                                                                                                        |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GCP_PROJECT` / `GCP_REGION`                                      | Your GCP project id and region (Vertex AI + Firestore).                                                                                                                                                           |
+| `VERTEX_PRIMARY_MODEL` / `VERTEX_EVAL_MODEL`                      | The chat models for the agent loop and the eval comparison run.                                                                                                                                                   |
+| `VERTEX_EMBEDDING_MODEL` / `VERTEX_EMBEDDING_DIM`                 | The embedding model and dimension; must match the Pinecone index.                                                                                                                                                 |
+| `PINECONE_API_KEY` / `PINECONE_INDEX`                             | The knowledge-base index credentials.                                                                                                                                                                             |
+| `RATE_LIMIT_RPM` / `RATE_LIMIT_TPM` / `RATE_LIMIT_WINDOW_SECONDS` | Per-IP limiter tuning; defaults are compiled into `src/config.py`, set these only to override.                                                                                                                    |
+| `APP_ENV`                                                         | `local` relaxes CORS to the Vite dev origin; `production` locks it to `PROD_FRONTEND_ORIGINS`.                                                                                                                    |
+| `PROD_FRONTEND_ORIGINS`                                           | Comma-separated browser origins allowed by CORS in production.                                                                                                                                                    |
+| `GOOGLE_APPLICATION_CREDENTIALS`                                  | Local dev only: path to a service-account key with Firestore + Vertex roles. Omit it to fall back to your own ADC (`gcloud auth application-default login`). Cloud Run uses its attached service account instead. |
 
 All environment variables are read exactly once, at boot, in `backend/src/config.py`; that file is the source of truth for names, defaults, and current model ids.
 

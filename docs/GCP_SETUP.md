@@ -266,7 +266,7 @@ usually right: dev uses the same-origin `/api` (Vite proxy), production bakes th
 ### Backend → Cloud Run
 
 The `backend/deploy.sh` script runs a single deploy.
-The image builds from `backend/Dockerfile`, not Cloud Run buildpacks: the Python buildpack doesn't install `uv` (our resolver) and its runtime registry doesn't carry every exact CPython patch, whereas a Dockerfile gives uv's lockfile-pinned installs, an exact interpreter, and a reviewable build.
+The image builds from `backend/Dockerfile`, not Cloud Run buildpacks: the Python buildpack doesn't install `uv` (the resolver) and its runtime registry doesn't carry every exact CPython patch, whereas a Dockerfile gives uv's lockfile-pinned installs, an exact interpreter, and a reviewable build.
 `gcloud run deploy --source=backend` auto-prefers the Dockerfile when one is present (verified against the Cloud Run source-deploy docs), so the same `--source` command builds the image on Cloud Build with no separate `docker build`/`push` and no manual Artifact Registry step.
 A `backend/.gcloudignore` keeps `.env` and the local `.venv` out of the source uploaded to Cloud Build (distinct from `.dockerignore`, which governs the image build context).
 Key flags that preserve the architecture:
@@ -284,7 +284,7 @@ gcloud run deploy trade-agent-backend \
 
 - `--allow-unauthenticated` is correct here: the API is a public synthetic-data demo, and spend is
   capped app-side (instance ceiling + Vertex quota + in-app per-IP rate limiter; `DESIGN_DECISIONS.md`
-  §11), not by IAM. This is why we deliberately do **not** add IAP / a Load Balancer (a fixed-cost
+  §11), not by IAM. This is why I deliberately do **not** add IAP / a Load Balancer (a fixed-cost
   component this architecture rules out).
 - `--min-instances=0` keeps the idle footprint at zero (no always-on instance). Trade-off: a ~5-15s cold start on the first request.
 

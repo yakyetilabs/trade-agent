@@ -23,7 +23,7 @@ export function DraftPanel({ result, guard }: { result: AgentResult; guard: Guar
   const [copied, setCopied] = useState(false);
   // Type the grounded draft out on first paint (this panel is keyed by trace id, so each run gets a
   // fresh reveal). The reveal is presentational only - the authoritative text is `pristine`, still
-  // used verbatim for copy/edit/approve; we never reassemble the draft from stream deltas.
+  // used verbatim for copy/edit/approve; the draft is never reassembled from stream deltas.
   const revealed = useTypewriter(pristine, true);
 
   const hasDraft = pristine !== "";

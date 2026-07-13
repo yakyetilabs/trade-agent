@@ -36,8 +36,8 @@ def _collection(name: str) -> CollectionReference:
 def _get_doc(collection: str, doc_id: str) -> DocumentSnapshot:
     """Fetch a single document snapshot by id.
 
-    The sync client's ``get()`` is typed as a sync/async union; we use the sync
-    client exclusively, so narrow it to :class:`DocumentSnapshot` here.
+    The sync client's ``get()`` is typed as a sync/async union; only the sync
+    client is used here, so narrow it to :class:`DocumentSnapshot`.
     """
     return cast(DocumentSnapshot, _collection(collection).document(doc_id).get())
 

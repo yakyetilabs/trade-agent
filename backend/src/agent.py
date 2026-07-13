@@ -270,7 +270,7 @@ def build_agent(model_id: str) -> CompiledStateGraph[Any, VendorContext, Any, An
     deprecated ``langgraph.prebuilt.create_react_agent``). The context type-param is pinned
     to :class:`VendorContext` - ``create_agent`` threads it into the compiled graph's return
     type, so the ``context=`` kwarg at the invoke site type-checks with no cast; the
-    state/input/output params are langgraph internals we treat opaquely.
+    state/input/output params are langgraph internals treated opaquely.
 
     The chat model comes from the provider seam
     :func:`src.model_provider.build_chat_model`, so this function names no concrete model
