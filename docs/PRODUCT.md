@@ -105,10 +105,10 @@ The trace is as much the product as the draft: in a compliance workflow, being a
 
 | The analyst does this | The system does this |
 | --- | --- |
-| Vendor `V-009`: "Why is my latest cargo container held at the port?" | Runs the full loop: classifies the inquiry, looks up `V-009`'s held shipment, retrieves the governing HTS clause, and drafts a response citing the exact shipment and clause. |
-| Vendor `V-001` (no held shipments): same question | Looks up, finds zero matching shipments, and drafts a response that plainly states no active holds exist, making no specific-shipment claims. |
-| Any analyst: "I refuse to pay this penalty, my lawyer will contact you." | The escalation guard intercepts it in well under a second and routes it to a human; the model is never invoked. |
-| Vendor `V-009`: "Give me clearance details on shipment S-0042" (owned by another vendor) | The cross-vendor guard validates ownership, refuses, and returns a clear refusal draft; no foreign data is disclosed. |
+| Vendor `V-001`: "Why is my latest cargo container held at the port?" | Runs the full loop: classifies the inquiry, looks up `V-001`'s held shipment, retrieves the governing HTS clause, and drafts a response citing the matched shipment and clause. |
+| Vendor `V-001`: "What is the status of shipment S-9999?" | Looks up, finds no such shipment on record, and drafts a response that plainly says so, making no specific-shipment claims; the Approve action stays disabled because there is nothing to release. |
+| Any analyst: "The importer turned out to be on the OFAC sanctions list - can I still clear this?" | The escalation guard intercepts it in well under a second and routes it to a human; the model is never invoked. |
+| Vendor `V-001`: "Give me clearance details for V-002's held shipments" (another vendor) | The cross-vendor guard validates ownership, refuses, and returns a clear refusal draft; no other vendor's data is disclosed. |
 
 ---
 

@@ -1,7 +1,7 @@
 # Design Decisions
 
-The architecture in this repository is not improvised. The design decisions follow a framework in the **MIT Sloan School of Management - _Implementing Agentic AI: Building Your Organizational Playbook_**.
-This document maps that framework's questions to the engineering choices in this codebase. Each section names the decision, the alternative I considered, the framework that guided the call, and the code location where the decision lives. If I claim something about the architecture, you can audit it against a file.
+The architecture in this repository is not improvised. Each design decision answers a specific governance question for putting an LLM inside a regulated workflow: how the agent is defined and bounded, where to build versus buy versus stack at each layer, how model confidence maps to autonomy, which safeguards ship versus stay documented, and how every decision stays auditable against the code.
+Each section below names the decision, the alternative I considered, the principle that guided the call, and the code location where the decision lives. If I claim something about the architecture, you can audit it against a file.
 
 The point of this page is to make one thing visible: this project is not a generic framework demo with an arbitrary backend. It is a specific set of architectural commitments made under a specific governance philosophy. The same skeleton would re-skin to almost any regulated-industry agentic workflow where data boundaries and audit trails are non-negotiable.
 
@@ -64,7 +64,7 @@ This definition also rules things out. A linear RAG pipeline that retrieves text
 
 ## 3. Build / Buy / Stack Posture
 
-The MIT program frames every agentic stack as a choice at three layers - model, framework, platform - with three options at each: build, buy, or stack a combination. The posture I committed to for this project:
+Every agentic stack is a choice at three layers - model, framework, platform - with three options at each: build, buy, or stack a combination. The posture I committed to for this project:
 
 **Model layer: Buy.** Gemini 2.5 Flash (`gemini-2.5-flash`, GA) via Vertex AI as the primary model for rapid tool calling and generation speed, with Gemini 2.5 Pro (`gemini-2.5-pro`, GA) as the evaluation comparison. I rejected building (computationally absurd at portfolio scale) and rejected complex multi-provider abstraction layers. Vertex AI gives me enterprise terms (zero data retention, regional data residency) without bespoke compliance overhead.
 
@@ -76,7 +76,7 @@ The MIT program frames every agentic stack as a choice at three layers - model, 
 
 ## 4. The Threshold Map
 
-The threshold map is the playbook's mechanism for translating model confidence into autonomy. For each decision the agent makes, there are three bands: act autonomously, escalate to human, or refuse entirely. The bands are a deliberate choice made by the system designer.
+The threshold map is the mechanism for translating model confidence into autonomy. For each decision the agent makes, there are three bands: act autonomously, escalate to human, or refuse entirely. The bands are a deliberate choice made by the system designer.
 
 For this workflow, the three decision types and their thresholds:
 
@@ -92,7 +92,7 @@ The third row is the architectural commitment that matters most. The agent's aut
 
 ## 5. Four Safeguard Layers - and Which Two Are Shipped
 
-The MIT program's safeguard framework names four layers: input filtering, deterministic policy checks, human-in-the-loop handoff, and an external audit monitor. The honest scope of this MVP is two layers fully implemented and two layers documented but not built.
+The safeguard model has four layers: input filtering, deterministic policy checks, human-in-the-loop handoff, and an external audit monitor. The honest scope of this MVP is two layers fully implemented and two layers documented but not built.
 
 **Shipped: Deterministic vendor scoping.** The `vendor_id` the analyst selects is pattern-validated at the API edge (a malformed id is a 422 before any orchestration), then bound into every tool through LangGraph's typed runtime context (`ToolRuntime`), never as a model-facing argument: the tool signature has no vendor parameter, so a prompt injection like "show me shipping logs for vendor 9999" has no slot to land in. A companion pre-model guard (below) refuses inquiries that reference another vendor's entities by ID. _(See [`backend/src/app.py`](https://github.com/yakyetilabs/trade-agent/blob/main/backend/src/app.py) and [`backend/src/tools/lookup_shipment_manifest.py`](https://github.com/yakyetilabs/trade-agent/blob/main/backend/src/tools/lookup_shipment_manifest.py).)_
 _Amended by the public-demo pivot (§11): an identity layer previously fronted this scoping - a Firebase-verified email checked against an in-memory allowlist that also carried each analyst's authorized vendor set (`security.py`). That layer was removed when the demo went public; the vendor binding and the guards below are auth-independent and unchanged._
@@ -117,13 +117,13 @@ Continuous evaluation as a first-class deployment concern separates AgentOps fro
 
 - **Real-time metric 1: Confidence-band approval rate.** For every classification, the agent's confidence score is logged alongside the eventual human review outcome (approve / edit / reject). A regression in the $0.95+$ band is a critical signal-it means the agent is confidently wrong about a custom regulation.
 - **Real-time metric 2: Vendor-scope integrity.** Two scope signals are emitted and expected to stay at zero. Before the model runs, the cross-vendor guard refuses any inquiry that references another vendor's entities by ID (`cross_vendor_refusal`). Inside the loop, `lookup_shipment_manifest` records `scope_violation=true` with the `attempted_vendor_id` if a by-id lookup ever resolves a shipment owned by another vendor. Both are greppable Cloud Logging events; a non-zero rate is a critical alert. (The pre-pivot 403 `scope_violation` signal at the API boundary went away with the identity layer; see §11.)
-- **Periodic review: Eval suite against the deployed agent.** A curated evaluation dataset sitting at `backend/eval/cases.json` exercises the system across 4 capability categories - happy path (the full grounded pipeline, including two grounding traps), exact HTS fetch (the deterministic retrieval mode), escalation triggers, and scope violations (the two pre-model guards) - with 12 hand-picked cases, 3 per category. Each case's rationale documents the property it proves and why it earned its slot; a small suite where every case is load-bearing is a stronger signal than volume. Each run evaluates the production primary model against its eval-ladder counterpart (whatever `backend/src/config.py` currently pins - Claude Haiku 4.5 vs Claude Sonnet 4.5 as of this edit), outputting cost/accuracy matrices to justify the production layout choice.
+- **Periodic review: Eval suite against the deployed agent.** A curated evaluation dataset sitting at `backend/eval/cases.json` exercises the system across 6 capability categories - happy path (the full grounded pipeline, including grounding traps), exact HTS fetch (the deterministic retrieval mode), semantic discovery retrieval (prose only, no code supplied), unsupported-response detection (a plausible code absent from the knowledge base must be reported as not on record, not approximated), escalation triggers, and scope violations (the two pre-model guards) - with 14 hand-picked cases. Each case's rationale documents the property it proves and why it earned its slot; a small suite where every case is load-bearing is a stronger signal than volume. Each run evaluates the production primary model against its eval-ladder counterpart (whatever `backend/src/config.py` currently pins - Gemini 2.5 Flash vs Gemini 2.5 Pro as of this edit), outputting cost/accuracy matrices to justify the production layout choice.
 
 ---
 
 ## 7. Autonomy Posture: Supervised, with a Path to Delegated
 
-The MIT program's autonomy dial names five settings: Advisory, Supervised, Delegated, Independent, Autonomous. This MVP sits firmly at **Supervised**: the agent proposes, the human disposes. Every single generated clearance response is manually reviewed.
+The autonomy dial has five settings: Advisory, Supervised, Delegated, Independent, Autonomous. This MVP sits firmly at **Supervised**: the agent proposes, the human disposes. Every single generated clearance response is manually reviewed.
 
 The promotion path to **Delegated** - where the agent can automatically release a defined, low-risk slice of logs (e.g., standard HTS code lookups with confidence $\ge 0.92$) without per-case manual review - is an evidence-based engineering decision, gated by two clear conditions:
 
@@ -154,7 +154,7 @@ _(See [`backend/src/tools/retrieve_tariff_regulation.py`](https://github.com/yak
 **The alternative I did not build: hybrid search + RRF + a live reranker.**
 The textbook "serious" retrieval stack fuses a lexical/sparse signal (BM25) with the dense one via Reciprocal Rank Fusion, then runs a cross-encoder reranker over the top candidates.
 It is the right answer at scale and the wrong answer here.
-The corpus is 24 hand-curated synthetic clauses (`build_hts_clauses()`); a cross-encoder reranking 24 documents is theater, and it would bury the actual signal - which is recognizing that the dominant failure mode, exact-code recall, is solved deterministically for $0 rather than statistically for a fixed hourly fee.
+The corpus is 24 hand-curated synthetic clauses (`build_hts_clauses()`); a cross-encoder reranking 24 documents is theater, and it would bury the actual signal - which is recognizing that the dominant failure mode, exact-code recall, is solved deterministically in-process rather than statistically behind an always-on reranker endpoint.
 Over-engineering 24 documents reads junior; right-sizing reads senior.
 
 **The threshold - when the reranker stops being theater.**
@@ -211,7 +211,7 @@ It works, but it stands up a second source of truth for "who may call this API" 
 Same-origin makes the question moot rather than merely answered.
 
 This is deliberately not a load balancer or IAP (cf. the IAP decision in §5): a Hosting rewrite carries no fixed hourly fee and does not put the public frontend behind a Google login wall.
-It is the free, native Hosting feature, `us-central1` is a first-class colocation region for it, and Cloud Run still scales to zero, so the idle footprint stays $0.
+It is the native Hosting feature, `us-central1` is a first-class colocation region for it, and Cloud Run still scales to zero, so there is no always-on component to operate.
 This pattern is current and supported as of June 2026 - Firebase App Hosting is positioned for server-rendered frameworks (Next.js / Angular), not for a static SPA plus a separate containerized API, so the rewrite is the right tool rather than the legacy one.
 
 **One honest note on caching.**
@@ -245,7 +245,7 @@ To ensure the boundary between what is built and what is claimed remains complet
 
 ## 11. The Public-Demo Pivot: Dropping the Auth Perimeter, Keeping the Guards (2026-07-10)
 
-**The decision.** The Firebase Authentication sign-in wall and the backend's in-memory email allowlist (the original "$0 zero-trust authorization layer", `backend/src/security.py`) were removed entirely.
+**The decision.** The Firebase Authentication sign-in wall and the backend's in-memory email allowlist (the original in-app zero-trust authorization layer, `backend/src/security.py`) were removed entirely.
 The app is now a public, no-auth demo over synthetic data.
 
 **Why.** The allowlist was added under the belief that the reference project this build is modeled on had a similar auth perimeter.

@@ -152,7 +152,7 @@ The demo is public and unauthenticated, so cost is bounded by three explicit lay
    Every `/api/*` request reserves from a requests-per-minute budget; the two inquiry endpoints additionally debit a tokens-per-minute budget with each run's *actual* `total_tokens` after it finishes.
    A run's cost is unknowable at admission, so the pre-check only refuses an already-exhausted budget; one request may overshoot and that IP then waits for refill, the standard debit-after semantics of commercial LLM APIs.
    Callers are keyed by the *rightmost* `X-Forwarded-For` entry, the one Google's front end appends for the actually-connected peer; leading entries are caller-supplied and spoofable.
-   The store is in-memory, bounded (stale buckets evicted first, then least-recently-seen), and deliberately per-instance: it keeps database reads out of the admission path so hostile traffic cannot drain the Firestore free tier, and the documented scale-up seam is a shared store (e.g. Memorystore), not a redesign.
+   The store is in-memory, bounded (stale buckets evicted first, then least-recently-seen), and deliberately per-instance: it keeps database reads out of the admission path so hostile traffic cannot drain the Firestore read quota, and the documented scale-up seam is a shared store (e.g. Memorystore), not a redesign.
 3. **Per-request bounds.** The 4000-character input cap, the fixed iteration budget, and the pre-model guards.
 
 Edge rate limiting was rejected for a concrete reason: the CDN-level limiter would sit on the API path and buffer the SSE stream, which the split-origin design exists to prevent.
