@@ -29,9 +29,12 @@ export function buildExamplePrompts(vendor: Vendor, vendors: Vendor[]): ExampleP
   const prompts: ExamplePrompt[] = [
     {
       // ID-agnostic on purpose: shipment ids are seed-RNG-generated, so the agent finds
-      // the vendor's held shipments itself rather than trusting a hardcoded id.
+      // the vendor's held shipments itself rather than trusting a hardcoded id. The status
+      // word must stay "held": every seed vendor has >=1 held shipment, but not every vendor
+      // has a "flagged" one (V-001, the default, has none), so "flagged" here made the agent
+      // filter status=flagged and return zero rows on the very first example.
       label: "Held shipment",
-      prompt: "Why is my flagged shipment held, and what is required to clear it?",
+      prompt: "Why is my shipment held, and what is required to clear it?",
     },
     {
       label: "Tariff & licensing",
