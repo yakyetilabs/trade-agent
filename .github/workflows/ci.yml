@@ -1,0 +1,96 @@
+# CI green bar for TradeOps AI - mirrors the local pre-commit checks:
+#   backend  -> backend/verify.sh  (ruff + ruff format + pyright + pytest)
+#   frontend -> pnpm typecheck + lint + vitest + build
+#
+# No cloud credentials are needed: the backend suite is hermetic (config is fully
+# defaulted, the GCP/Vertex/Pinecone clients are lazy, and the model/vector/embedding
+# seams are mocked in tests), and the frontend build reads only the committed,
+# non-secret frontend/.env.production. So this workflow runs on a bare runner.
+#
+# Action pins verified against the live release pages (2026-07): checkout v7,
+# setup-node v6, pnpm/action-setup v6, setup-uv pinned to a full immutable tag
+# (astral-sh stopped publishing floating @v8 tags for supply-chain safety).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# One in-flight run per ref; a new push cancels the superseded run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: the jobs only read the checked-out code.
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend green bar
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+
+      # uv provisions the interpreter pinned in backend/.python-version (3.12).
+      - name: Sync dependencies (locked)
+        run: uv sync --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Pyright (incl. reportDeprecated)
+        run: uv run pyright
+
+      - name: Pytest
+        run: uv run pytest
+
+  frontend:
+    name: Frontend green bar
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      # pnpm must be installed before setup-node so its pnpm store cache can resolve.
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies (frozen)
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm run build
