@@ -55,4 +55,6 @@ CLAUDE.local.md
 SESSION_ARCHIVE.local.md
 # Forward implementation-plan handoffs, kept local (opened on purpose, not auto-loaded)
 PIVOT_PLAN.local.md
+# Domain cutover runbook, kept local (opened on purpose, not auto-loaded)
+CUTOVER_RUNBOOK.local.md
 .claude/
