@@ -180,6 +180,15 @@ This is a living document; keep appending as the deploy phase continues.
 - Practice for any Vite (or similar static-replacement) frontend: read env vars per-key in the one config module, and add a post-build grep of `dist/` for values that should be gone as part of removal work.
   These are usually public identifiers, not secrets, but a removal is not done until the artifact is clean.
 
+## A model quota grant is several quotas; probe the endpoint, don't trust the console
+
+- Serving a partner-published model on a managed ML platform (here: Anthropic models on Vertex AI) is gated by multiple independent per-base-model quota metrics - requests per minute AND input tokens per minute - each scoped per region, plus a separate global-endpoint quota namespace.
+  A grant that raises one metric in one scope still returns 429 if any other metric on the request path is zero.
+- A console quota page can read as "unblocked" while the approval covers only a subset of metrics or regions, or has not yet propagated.
+  Concrete hit here: the console showed the Anthropic-on-Vertex block lifted, but every live call failed - the global endpoint on `global_online_prediction_requests_per_base_model = 0`, the regional endpoints on `online_prediction_input_tokens_per_minute_per_base_model = 0`.
+- The two cheapest diagnostics: read the metric name in the 429 body (it names the exact quota and base model to ask for), and probe one prompt per region x model - the error class distinguishes the cases (429 = served but no quota; 404/400 = model not offered in that region at all).
+- Practice: after any quota-increase approval, run a single live smoke call on the exact model id and endpoint the workload uses before declaring the block cleared, and record the metric names from any remaining 429 - they are precisely what the follow-up quota request must name.
+
 ## Open questions / to verify next
 
 - Whether a Server-Sent Events stream survives a CDN-fronted Hosting layer fully unbuffered, end to end.

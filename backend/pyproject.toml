@@ -20,6 +20,7 @@ dependencies = [
     # so no provider package (e.g. langchain-openai) is pulled in as a dependency.
     "langgraph>=0.6",
     "langchain>=1.0",
+    "langchain-google-vertexai[anthropic]>=3.2",
 ]
 
 [dependency-groups]

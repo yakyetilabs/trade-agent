@@ -48,6 +48,14 @@ GCP_REGION: Final[str] = os.getenv("GCP_REGION", "us-central1")
 VERTEX_PRIMARY_MODEL: Final[str] = os.getenv("VERTEX_PRIMARY_MODEL", "gemini-2.5-flash")
 VERTEX_EVAL_MODEL: Final[str] = os.getenv("VERTEX_EVAL_MODEL", "gemini-2.5-pro")
 
+# Claude on Vertex AI - eval-only comparison arms (the serving path never reads these;
+# only the eval runner passes them through run_agent's model_id seam). Vertex publishes
+# dated snapshots with an "@" version separator, unlike the first-party "-" ids.
+CLAUDE_HAIKU_MODEL: Final[str] = os.getenv("CLAUDE_HAIKU_MODEL", "claude-haiku-4-5@20251001")
+CLAUDE_SONNET_MODEL: Final[str] = os.getenv("CLAUDE_SONNET_MODEL", "claude-sonnet-4-5@20250929")
+# Anthropic-on-Vertex serves from the global endpoint, not a pinned region.
+ANTHROPIC_VERTEX_REGION: Final[str] = os.getenv("ANTHROPIC_VERTEX_REGION", "global")
+
 # Embeddings also on Gemini; the Pinecone index is fixed at 768 dims.
 VERTEX_EMBEDDING_MODEL: Final[str] = os.getenv("VERTEX_EMBEDDING_MODEL", "gemini-embedding-001")
 VERTEX_EMBEDDING_DIM: Final[int] = int(os.getenv("VERTEX_EMBEDDING_DIM", "768"))

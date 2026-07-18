@@ -7,10 +7,12 @@ credentials); the test locks in the construction contract the seam guarantees.
 import pytest
 
 import src.model_provider as model_provider
-from src.config import GCP_PROJECT, GCP_REGION
+from src.config import ANTHROPIC_VERTEX_REGION, GCP_PROJECT, GCP_REGION
 
 
-def _capture_ctor(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+def _capture_ctor(
+    monkeypatch: pytest.MonkeyPatch, class_name: str = "ChatGoogleGenerativeAI"
+) -> dict[str, object]:
     """Patch the provider class so no real model is built, capturing its kwargs."""
     captured: dict[str, object] = {}
 
@@ -18,7 +20,7 @@ def _capture_ctor(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         captured.update(kwargs)
         return object()
 
-    monkeypatch.setattr(model_provider, "ChatGoogleGenerativeAI", fake_ctor)
+    monkeypatch.setattr(model_provider, class_name, fake_ctor)
     return captured
 
 
@@ -49,3 +51,20 @@ def test_build_chat_model_enables_thoughts_when_streaming(monkeypatch: pytest.Mo
     assert captured["vertexai"] is True
     assert captured["temperature"] == 0.0
     assert captured["model"] == "gemini-2.5-flash"
+
+
+def test_build_chat_model_binds_claude_ids_on_vertex(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_ctor(monkeypatch, "ChatAnthropicVertex")
+
+    model_provider.build_chat_model("claude-haiku-4-5@20251001", stream_thoughts=True)
+
+    # The eval-only Claude arm: temperature pinned to 0 like the Gemini arms, and no
+    # thinking config even when the loop asks for streamed thoughts - thinking would
+    # force Anthropic's default sampling, and the eval path never streams reasoning.
+    assert captured == {
+        "project": GCP_PROJECT,
+        "location": ANTHROPIC_VERTEX_REGION,
+        "model_name": "claude-haiku-4-5@20251001",
+        "temperature": 0.0,
+        "max_output_tokens": 4096,
+    }

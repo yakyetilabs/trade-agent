@@ -1,21 +1,139 @@
-"""Unit test for the runner's pure report aggregation (no model)."""
+"""Unit tests for the runner's pure report aggregation (no model)."""
 
+from eval.pricing import estimate_cost_usd
 from eval.run_eval import RunRow, summarize
 
 
-def test_summarize_renders_accuracy_latency_and_failures() -> None:
+def _row(
+    model: str,
+    case_id: str,
+    *,
+    model_id: str = "test-model",
+    category: str = "exact_hts_fetch",
+    passed: bool = True,
+    passed_count: int = 3,
+    total: int = 3,
+    duration_ms: float = 1000.0,
+    prompt_tokens: int | None = None,
+    output_tokens: int | None = None,
+    total_tokens: int | None = None,
+    assertion_results: dict[str, bool] | None = None,
+    failed_assertions: list[str] | None = None,
+) -> RunRow:
+    return RunRow(
+        model=model,
+        model_id=model_id,
+        case_id=case_id,
+        category=category,
+        passed=passed,
+        passed_count=passed_count,
+        total=total,
+        duration_ms=duration_ms,
+        prompt_tokens=prompt_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        assertion_results=assertion_results if assertion_results is not None else {},
+        failed_assertions=failed_assertions if failed_assertions is not None else [],
+    )
+
+
+def _cost(model_id: str, prompt_tokens: int, output_tokens: int) -> float:
+    cost = estimate_cost_usd(model_id, prompt_tokens, output_tokens)
+    assert cost is not None
+    return cost
+
+
+def test_summarize_renders_headline_accuracy_latency_and_failures() -> None:
     rows = [
-        RunRow("flash", "c1", "exact_hts_fetch", True, 3, 3, 1200.0, 140, []),
-        RunRow("flash", "c2", "escalation_triggers", False, 2, 3, 90.0, None, ["includes_any"]),
-        RunRow("pro", "c1", "exact_hts_fetch", True, 3, 3, 2000.0, 260, []),
-        RunRow("pro", "c2", "escalation_triggers", True, 3, 3, 95.0, None, []),
+        _row(
+            "flash",
+            "c1",
+            model_id="gemini-2.5-flash",
+            duration_ms=1200.0,
+            prompt_tokens=10_000,
+            output_tokens=2_000,
+            total_tokens=12_000,
+            assertion_results={"disposition": True, "intent_in": True},
+        ),
+        _row(
+            "flash",
+            "c2",
+            model_id="gemini-2.5-flash",
+            category="escalation_triggers",
+            passed=False,
+            passed_count=2,
+            duration_ms=90.0,
+            # No intent_in here: flash's intent denominator must be 1, not 2.
+            assertion_results={"disposition": False, "tool_absent:x": True, "cites:y": True},
+            failed_assertions=["disposition"],
+        ),
+        _row(
+            "pro",
+            "c1",
+            model_id="gemini-2.5-pro",
+            duration_ms=2000.0,
+            prompt_tokens=2_000,
+            output_tokens=200,
+            total_tokens=2_200,
+            assertion_results={"disposition": True, "intent_in": True},
+        ),
+        _row(
+            "pro",
+            "c2",
+            model_id="gemini-2.5-pro",
+            category="escalation_triggers",
+            duration_ms=100.0,
+            prompt_tokens=500,
+            output_tokens=50,
+            total_tokens=550,
+            assertion_results={"disposition": True, "intent_in": True},
+        ),
     ]
     md = summarize(rows, ["flash", "pro"])
 
     assert "# Eval Report" in md
+    # The header records the concrete model id behind each label.
+    assert "Models: flash (gemini-2.5-flash), pro (gemini-2.5-pro)" in md
+
+    # Headline rates aggregate per-assertion outcomes across each label's rows.
+    assert "## Headline rates" in md
+    assert "| flash | 1/2 (50%) | 1/1 (100%) |" in md
+    assert "| pro | 2/2 (100%) | 2/2 (100%) |" in md
+
     assert "exact_hts_fetch" in md
-    assert "| TOTAL |" in md
-    assert "## Latency & cost" in md
-    assert "c2: includes_any" in md  # the single failure is listed
-    # flash total = 1/2 passed; pro total = 2/2 passed
     assert "| TOTAL | 1/2 | 2/2 |" in md
+
+    # Latency & cost: mean/p50/p95 over durations, token sums, and priced cost cells.
+    flash_cost = _cost("gemini-2.5-flash", 10_000, 2_000)
+    flash_cells = f"${flash_cost:.4f}", f"${flash_cost:.4f}"  # one priced run: mean == total
+    assert f"| flash | 645 | 90 | 1200 | 10000 | 2000 | {flash_cells[0]} | {flash_cells[1]} |" in md
+    pro_c1 = _cost("gemini-2.5-pro", 2_000, 200)
+    pro_c2 = _cost("gemini-2.5-pro", 500, 50)
+    pro_cells = f"${(pro_c1 + pro_c2) / 2:.4f}", f"${pro_c1 + pro_c2:.4f}"
+    assert f"| pro | 1050 | 100 | 2000 | 2500 | 250 | {pro_cells[0]} | {pro_cells[1]} |" in md
+    assert "Token prices as of" in md
+
+    assert "[flash] c2: disposition" in md  # the single failure is listed
+
+
+def test_summarize_degraded_and_unpriced_rows_render_na() -> None:
+    rows = [
+        _row(
+            "flash",
+            "c1",
+            passed=False,
+            passed_count=0,
+            total=1,
+            duration_ms=0.0,
+            assertion_results={},  # crashed run: never scored
+            failed_assertions=["run_error:ValueError"],
+        ),
+    ]
+    md = summarize(rows, ["flash"])
+
+    assert "Models: flash (test-model)" in md
+    # A crashed run contributes to no headline denominator, and an unpriced
+    # model id ("test-model") yields n/a cost cells rather than a wrong number.
+    assert "| flash | n/a | n/a |" in md
+    assert "| flash | 0 | 0 | 0 | 0 | 0 | n/a | n/a |" in md
+    assert "[flash] c1: run_error:ValueError" in md
