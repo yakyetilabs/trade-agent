@@ -55,6 +55,10 @@ CLAUDE_HAIKU_MODEL: Final[str] = os.getenv("CLAUDE_HAIKU_MODEL", "claude-haiku-4
 CLAUDE_SONNET_MODEL: Final[str] = os.getenv("CLAUDE_SONNET_MODEL", "claude-sonnet-4-5@20250929")
 # Anthropic-on-Vertex serves from the global endpoint, not a pinned region.
 ANTHROPIC_VERTEX_REGION: Final[str] = os.getenv("ANTHROPIC_VERTEX_REGION", "global")
+# Direct Anthropic API key - powers the eval-only fallback binding for first-party
+# dashed "claude-*" ids (src/model_provider.py). Unset in production: the serving path
+# is Gemini, and the Claude-on-Vertex arms authenticate via ADC with no key at all.
+ANTHROPIC_API_KEY: Final[str] = os.getenv("ANTHROPIC_API_KEY", "")
 
 # Embeddings also on Gemini; the Pinecone index is fixed at 768 dims.
 VERTEX_EMBEDDING_MODEL: Final[str] = os.getenv("VERTEX_EMBEDDING_MODEL", "gemini-embedding-001")

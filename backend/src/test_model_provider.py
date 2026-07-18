@@ -5,6 +5,7 @@ credentials); the test locks in the construction contract the seam guarantees.
 """
 
 import pytest
+from pydantic import SecretStr
 
 import src.model_provider as model_provider
 from src.config import ANTHROPIC_VERTEX_REGION, GCP_PROJECT, GCP_REGION
@@ -68,3 +69,36 @@ def test_build_chat_model_binds_claude_ids_on_vertex(monkeypatch: pytest.MonkeyP
         "temperature": 0.0,
         "max_output_tokens": 4096,
     }
+
+
+def test_build_chat_model_binds_dashed_claude_ids_to_direct_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_ctor(monkeypatch, "ChatAnthropic")
+    monkeypatch.setattr(model_provider, "ANTHROPIC_API_KEY", "test-key")
+
+    model_provider.build_chat_model("claude-haiku-4-5-20251001", stream_thoughts=True)
+
+    # A first-party dashed id selects the direct-API fallback arm: same pinned
+    # temperature and output cap as the Vertex form, no thinking config (see above).
+    # Keys are the pydantic alias spellings (model_name = model, max_tokens_to_sample
+    # = max_tokens); timeout/stop are the explicit class defaults.
+    assert captured == {
+        "model_name": "claude-haiku-4-5-20251001",
+        "api_key": SecretStr("test-key"),
+        "temperature": 0.0,
+        "max_tokens_to_sample": 4096,
+        "timeout": None,
+        "stop": None,
+    }
+
+
+def test_build_chat_model_direct_api_refuses_without_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(model_provider, "ANTHROPIC_API_KEY", "")
+
+    # Without the key the branch fails loudly at construction - production never sets
+    # the key, so the direct-API arm is structurally unreachable there.
+    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+        model_provider.build_chat_model("claude-haiku-4-5-20251001")

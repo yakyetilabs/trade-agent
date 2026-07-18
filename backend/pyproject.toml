@@ -21,6 +21,9 @@ dependencies = [
     "langgraph>=0.6",
     "langchain>=1.0",
     "langchain-google-vertexai[anthropic]>=3.2",
+    # Direct-API Claude binding for the eval comparison arms (dashed "claude-*" ids in
+    # src/model_provider.py); the Vertex Claude arm rides the [anthropic] extra above.
+    "langchain-anthropic>=1.4.8",
 ]
 
 [dependency-groups]

@@ -20,6 +20,10 @@ _PER_MTOK_USD: dict[str, tuple[float, float]] = {
     "gemini-2.5-pro": (1.25, 10.00),
     "claude-haiku-4-5@20251001": (1.00, 5.00),
     "claude-sonnet-4-5@20250929": (3.00, 15.00),
+    # The same snapshots' first-party dashed ids (the direct-API binding in
+    # src/model_provider.py); Anthropic lists one price per model on either platform.
+    "claude-haiku-4-5-20251001": (1.00, 5.00),
+    "claude-sonnet-4-5-20250929": (3.00, 15.00),
 }
 
 
