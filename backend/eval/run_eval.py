@@ -15,11 +15,13 @@ Usage (from ``backend/``)::
     uv run python -m eval.run_eval                       # flash + pro, all cases
     uv run python -m eval.run_eval --models flash,haiku  # any label subset
     uv run python -m eval.run_eval --category escalation_triggers
+    uv run python -m eval.run_eval --models flash --pause-seconds 45  # quota-paced
 """
 
 import argparse
 import json
 import statistics
+import time
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -66,10 +68,22 @@ class RunRow:
     failed_assertions: list[str]
 
 
-def run_suite(cases: Sequence[EvalCase], model_label: str, model_id: str) -> list[RunRow]:
-    """Run every case under one model and score it. Errors degrade to a failed row."""
+def run_suite(
+    cases: Sequence[EvalCase],
+    model_label: str,
+    model_id: str,
+    pause_seconds: float = 0.0,
+) -> list[RunRow]:
+    """Run every case under one model and score it. Errors degrade to a failed row.
+
+    ``pause_seconds`` sleeps between consecutive cases: Vertex enforces per-minute
+    per-base-model token quotas, and a full-speed suite tripped the flash input-TPM cap
+    live (2026-07-18), silently degrading every subsequent case to a fallback draft.
+    """
     rows: list[RunRow] = []
-    for case in cases:
+    for index, case in enumerate(cases):
+        if index and pause_seconds > 0:
+            time.sleep(pause_seconds)
         try:
             result = run_agent(case.vendor_id, case.inquiry, model_id=model_id)
             score = score_case(result, case)
@@ -219,6 +233,12 @@ def main() -> None:
         "--models", default="flash,pro", help="comma list of: flash, pro, haiku, sonnet"
     )
     parser.add_argument("--category", default=None, help="run only one category")
+    parser.add_argument(
+        "--pause-seconds",
+        type=float,
+        default=0.0,
+        help="sleep between cases to stay under per-minute model quotas",
+    )
     args = parser.parse_args()
 
     cases = load_cases()
@@ -229,7 +249,7 @@ def main() -> None:
     all_rows: list[RunRow] = []
     for label in labels:
         print(f"Running {len(cases)} cases on {label} ({_MODELS[label]})...")
-        all_rows.extend(run_suite(cases, label, _MODELS[label]))
+        all_rows.extend(run_suite(cases, label, _MODELS[label], pause_seconds=args.pause_seconds))
 
     report = summarize(all_rows, labels)
     print("\n" + report)

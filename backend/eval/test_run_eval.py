@@ -1,7 +1,13 @@
-"""Unit tests for the runner's pure report aggregation (no model)."""
+"""Unit tests for the runner's pure report aggregation and pacing (no model)."""
 
+from types import SimpleNamespace
+
+import pytest
+
+import eval.run_eval as run_eval
 from eval.pricing import estimate_cost_usd
-from eval.run_eval import RunRow, summarize
+from eval.run_eval import RunRow, run_suite, summarize
+from eval.schema import load_cases
 
 
 def _row(
@@ -137,3 +143,26 @@ def test_summarize_degraded_and_unpriced_rows_render_na() -> None:
     assert "| flash | n/a | n/a |" in md
     assert "| flash | 0 | 0 | 0 | 0 | 0 | n/a | n/a |" in md
     assert "[flash] c1: run_error:ValueError" in md
+
+
+def test_run_suite_paces_between_cases_but_not_before_the_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cases = load_cases()[:3]
+    result = SimpleNamespace(duration_ms=1.0, prompt_tokens=1, output_tokens=1, total_tokens=2)
+    score = SimpleNamespace(passed=True, passed_count=1, total=1, assertions=[])
+    sleeps: list[float] = []
+    monkeypatch.setattr(run_eval, "run_agent", lambda *a, **k: result)
+    monkeypatch.setattr(run_eval, "score_case", lambda *a: score)
+    monkeypatch.setattr(run_eval.time, "sleep", sleeps.append)
+
+    rows = run_suite(cases, "flash", "test-model", pause_seconds=45.0)
+
+    # N cases -> N-1 pauses: the sleep separates consecutive cases only, keeping each
+    # minute's quota spend to roughly one case.
+    assert len(rows) == 3
+    assert sleeps == [45.0, 45.0]
+
+    sleeps.clear()
+    run_suite(cases, "flash", "test-model")
+    assert sleeps == []  # default stays full speed
