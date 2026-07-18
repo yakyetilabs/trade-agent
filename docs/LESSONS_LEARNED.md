@@ -23,6 +23,8 @@ This is a living document; keep appending as the deploy phase continues.
 - [The actual dials for cost vs. availability on a scale-to-zero service](#the-actual-dials-for-cost-vs-availability-on-a-scale-to-zero-service)
 - [Model-API feature constraints compose; verify the combination, not each feature alone](#model-api-feature-constraints-compose-verify-the-combination-not-each-feature-alone)
 - [A custom domain is not authorized for federated sign-in until you allowlist it](#a-custom-domain-is-not-authorized-for-federated-sign-in-until-you-allowlist-it)
+- [A model quota grant is several quotas; probe the endpoint, don't trust the console](#a-model-quota-grant-is-several-quotas-probe-the-endpoint-dont-trust-the-console)
+- [Agent loops burst through per-minute token quotas, and graceful fallbacks hide it](#agent-loops-burst-through-per-minute-token-quotas-and-graceful-fallbacks-hide-it)
 - [Open questions / to verify next](#open-questions--to-verify-next)
 
 ## A Firebase project is a GCP project
@@ -188,6 +190,18 @@ This is a living document; keep appending as the deploy phase continues.
   Concrete hit here: the console showed the Anthropic-on-Vertex block lifted, but every live call failed - the global endpoint on `global_online_prediction_requests_per_base_model = 0`, the regional endpoints on `online_prediction_input_tokens_per_minute_per_base_model = 0`.
 - The two cheapest diagnostics: read the metric name in the 429 body (it names the exact quota and base model to ask for), and probe one prompt per region x model - the error class distinguishes the cases (429 = served but no quota; 404/400 = model not offered in that region at all).
 - Practice: after any quota-increase approval, run a single live smoke call on the exact model id and endpoint the workload uses before declaring the block cleared, and record the metric names from any remaining 429 - they are precisely what the follow-up quota request must name.
+
+## Agent loops burst through per-minute token quotas, and graceful fallbacks hide it
+
+- An agent loop multiplies one task into several model calls in quick succession: a classifier call plus one call per tool iteration, each resending the system prompt, every tool schema, and the growing conversation.
+  A per-minute input-token quota that comfortably admits an ordinary chat request can be exhausted by a single task's burst, so pacing tasks apart cannot prevent 429s that occur inside one task.
+- A retry policy is only as good as its cumulative horizon.
+  The client library's default exponential backoff here summed to roughly 31 seconds, which can expire entirely inside one depleted minute-window; stretching the envelope past a full refill window (~123 seconds, via one client parameter) is the minimum that can work - and is still insufficient when the quota value itself sits below one request's size.
+- The damaging failure mode was not the 429 but the masking: the serving path degrades a failed model call into a graceful fallback response, which is right for end users and wrong for measurement.
+  Three evaluation passes here read as "completed" while their rows were fallback text; the tell was provenance, not status - a row with zero recorded tokens and no cost never touched the model.
+- The 429 body names the exact metric and base model (here `global_generate_content_input_tokens_per_minute_per_base_model`), but neither the configured value nor the depletion state; bracket those empirically.
+  Two probes bound the admission budget in minutes: a 7-token call succeeded instantly while a single ~2.5k-token call failed through a full 129-second retry ladder against an otherwise idle project - proof the effective per-minute value sat below one ordinary request, which no client-side behavior can fix.
+- Practice: before a batch run, compute one task's burst profile (calls x input tokens per call) against the quota value; validate one task live before committing to the batch; treat zero-token "successes" as corrupt rows and discard that run's results; and when 429s persist against an idle project, stop tuning the client and go read the configured quota value.
 
 ## Open questions / to verify next
 
