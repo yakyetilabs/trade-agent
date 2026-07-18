@@ -84,6 +84,11 @@ def build_chat_model(model_id: str, *, stream_thoughts: bool = False) -> BaseCha
         "project": GCP_PROJECT,
         "location": GCP_REGION,
         "temperature": 0.0,
+        # 8 attempts x exponential delay (google-genai defaults: 1s, x2, 60s cap) spans
+        # ~123s - past a depleted per-minute Vertex token-quota window. The library
+        # default of 6 tops out near ~31s, which dies inside the same window (429s
+        # observed live 2026-07-18 degrading eval runs to fallback drafts).
+        "max_retries": 8,
     }
     if stream_thoughts:
         kwargs["include_thoughts"] = True

@@ -32,12 +32,14 @@ def test_build_chat_model_configures_vertex_gemini(monkeypatch: pytest.MonkeyPat
 
     # vertexai=True is load-bearing: Vertex ADC, not the Gemini Developer API key path.
     # Default (no streaming): no thinking config is sent at all - a plain chat model.
+    # max_retries=8 stretches 429 backoff past a per-minute quota window (~123s).
     assert captured == {
         "model": "gemini-2.5-flash",
         "vertexai": True,
         "project": GCP_PROJECT,
         "location": GCP_REGION,
         "temperature": 0.0,
+        "max_retries": 8,
     }
 
 
