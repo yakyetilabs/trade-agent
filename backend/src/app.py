@@ -24,11 +24,17 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src import repository
-from src.agent import AgentResult, UnknownVendorError, run_agent
+from src.agent import (
+    RATE_LIMITED_CLIENT_MESSAGE,
+    TIMEOUT_CLIENT_MESSAGE,
+    AgentResult,
+    UnknownVendorError,
+    run_agent,
+)
 from src.config import APP_ENV, CORS_ORIGINS, VERTEX_PRIMARY_MODEL
-from src.models import VENDOR_ID_PATTERN, AgentTrace, TraceDisposition, Vendor
+from src.models import VENDOR_ID_PATTERN, AgentTrace, RunErrorClass, TraceDisposition, Vendor
 from src.ratelimit import RateLimitDecision, rate_limiter, resolve_client_ip
-from src.streaming import DoneEvent, sse_format, stream_agent_run
+from src.streaming import DoneEvent, ErrorEvent, sse_format, stream_agent_run
 
 app = FastAPI(title="TradeOps AI backend", version="0.1.0")
 
@@ -129,6 +135,11 @@ def submit_inquiry(
     dominates), so FastAPI dispatches this sync handler to its worker threadpool,
     keeping the trace ``ContextVar`` on one thread. The run's actual token usage is
     debited against the caller's TPM budget after it returns.
+
+    The trace is already persisted (full audit) by the time a RATE_LIMITED/TIMEOUT
+    ``error_class`` turns into a 503 here - the audit trail stays complete even though the
+    client sees an honest error instead of the generic fallback draft. UPSTREAM_ERROR keeps
+    today's behavior: the fallback draft is returned as a normal 200.
     """
     try:
         result = run_agent(request.vendor_id, request.inquiry)
@@ -137,7 +148,19 @@ def submit_inquiry(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unknown vendor: {exc.vendor_id}",
         ) from exc
+    # Tokens may have been consumed even on a degraded run, so debit before raising.
     rate_limiter.debit_tokens(admission.client_ip, result.total_tokens or 0)
+    if result.error_class is RunErrorClass.RATE_LIMITED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=RATE_LIMITED_CLIENT_MESSAGE,
+            headers={"Retry-After": "60"},
+        )
+    if result.error_class is RunErrorClass.TIMEOUT:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=TIMEOUT_CLIENT_MESSAGE,
+        )
     return result
 
 
@@ -163,9 +186,14 @@ async def submit_inquiry_stream(
             async for event in stream_agent_run(request.vendor_id, request.inquiry):
                 if isinstance(event, DoneEvent) and event.result.total_tokens:
                     total_tokens = event.result.total_tokens
+                elif isinstance(event, ErrorEvent) and event.total_tokens:
+                    # A RATE_LIMITED/TIMEOUT run ends in an error event instead of done,
+                    # but its consumed tokens still settle against the caller's budget
+                    # (parity with the sync path, which debits before raising its 503).
+                    total_tokens = event.total_tokens
                 yield sse_format(event)
         finally:
-            # A run's cost is knowable only from the terminal done event, so the TPM
+            # A run's cost is knowable only from the terminal event, so the TPM
             # budget settles when the stream closes (client disconnects included).
             rate_limiter.debit_tokens(admission.client_ip, total_tokens)
 

@@ -190,6 +190,23 @@ class TraceDisposition(StrEnum):
     REJECTED = "rejected"
 
 
+class RunErrorClass(StrEnum):
+    """Why the agent loop's model invocation failed, for a no-draft fallback trace.
+
+    Set only when ``build_run_trace`` received an ``invoke_error`` (see
+    ``src.agent.classify_invoke_error``); ``None`` on a healthy run or a pre-model guard
+    short-circuit, where the model never ran and there is no invocation error to classify.
+    The sync and streaming API surfaces read this to decide whether a run's client-facing
+    response stays the generic fallback draft (``UPSTREAM_ERROR``) or is surfaced honestly
+    as a temporary service condition (``RATE_LIMITED``, ``TIMEOUT``) instead of silently
+    masking a depleted quota as a normal answer.
+    """
+
+    RATE_LIMITED = "rate_limited"
+    TIMEOUT = "timeout"
+    UPSTREAM_ERROR = "upstream_error"
+
+
 class ImportClassification(BaseModel):
     """Hybrid classifier output: routing intent + optional advisory HTS proposal.
 
@@ -269,3 +286,7 @@ class AgentTrace(BaseModel):
     output_tokens: int | None = None
     thoughts_tokens: int | None = None
     total_tokens: int | None = None
+    # Set only on a no-draft fallback trace (see RunErrorClass); None on a healthy run or a
+    # pre-model guard short-circuit. Additive Firestore field - old documents read back as
+    # None via the model default, no migration needed.
+    error_class: RunErrorClass | None = None

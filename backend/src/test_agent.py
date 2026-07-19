@@ -10,9 +10,14 @@ no Vertex, Pinecone, Firestore, or credentials in the loop.
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+import anthropic
+import httpx
 import pytest
+from google.api_core import exceptions as google_api_exceptions
+from google.genai import errors as google_genai_errors
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
@@ -23,6 +28,8 @@ from src.models import (
     ImportClassification,
     InquiryIntent,
     RestrictionLevel,
+    RunErrorClass,
+    ToolCallLog,
     TraceDisposition,
     Vendor,
 )
@@ -427,6 +434,9 @@ def test_loop_without_draft_falls_back_to_iteration_cap(
     assert result.classification.intent is InquiryIntent.ITERATION_CAP_EXCEEDED
     assert result.draft_actionable is False  # a no-draft fallback is not releasable
     assert result.tool_call_count == 2  # the partial tool calls are still audited
+    # No invocation exception fired (the loop just ran out of tool calls to make), so there
+    # is nothing to classify - error_class stays None, distinct from an actual invoke error.
+    assert result.error_class is None
     assert len(captured) == 1
 
 
@@ -447,7 +457,31 @@ def test_invoke_failure_degrades_to_fallback_draft(monkeypatch: pytest.MonkeyPat
     assert "RuntimeError" in result.classification.reasoning
     assert result.draft_actionable is False  # a degraded fallback is not releasable
     assert result.tool_call_count == 0
+    # An unrecognized exception classifies as UPSTREAM_ERROR, not RATE_LIMITED/TIMEOUT - the
+    # API surfaces keep returning this fallback draft as a normal 200/done.
+    assert result.error_class is RunErrorClass.UPSTREAM_ERROR
     assert len(captured) == 1  # a failed run still produces exactly one audit trace
+    assert captured[0].error_class is RunErrorClass.UPSTREAM_ERROR
+
+
+def test_invoke_failure_rate_limited_is_classified_on_the_result_and_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end wiring: a rate-limit exception from the model call flows through
+    build_run_trace into both the persisted trace and the projected AgentResult."""
+    _vendor_exists(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    captured = _capture_traces(monkeypatch)
+
+    fake = _FakeAgent(error=google_api_exceptions.ResourceExhausted("quota exceeded"))
+    _install_agent(monkeypatch, fake)
+
+    result = agent.run_agent("V-001", "What is the duty rate for cotton t-shirts?")
+
+    assert result.error_class is RunErrorClass.RATE_LIMITED
+    assert result.draft_response == agent._FALLBACK_DRAFT
+    assert len(captured) == 1
+    assert captured[0].error_class is RunErrorClass.RATE_LIMITED
 
 
 # --- Build-time wiring (security-critical: vendor context + the four tools) ------
@@ -500,3 +534,163 @@ def test_system_prompt_carries_the_cross_model_tool_mandates() -> None:
     # Delivery: the draft tool is the only answer channel; a prose ending is a failure.
     assert "ONLY way to deliver your answer" in prompt
     assert "ends in plain text" in prompt
+
+
+# --- classify_invoke_error -------------------------------------------------------
+# Exception construction below uses the REAL SDK exception classes (verified against
+# backend/.venv's installed sources - see classify_invoke_error's docstring), not stand-in
+# subclasses, so a constructor-signature drift on a future SDK upgrade fails these tests
+# rather than silently going unnoticed.
+
+
+def _anthropic_status_error(
+    cls: type[anthropic.APIStatusError], status_code: int
+) -> anthropic.APIStatusError:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx.Response(status_code, request=request)
+    return cls("boom", response=response, body=None)
+
+
+def test_classify_invoke_error_maps_anthropic_rate_limit() -> None:
+    err = _anthropic_status_error(anthropic.RateLimitError, 429)
+    assert agent.classify_invoke_error(err) is RunErrorClass.RATE_LIMITED
+
+
+def test_classify_invoke_error_maps_anthropic_timeout() -> None:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    err = anthropic.APITimeoutError(request=request)
+    assert agent.classify_invoke_error(err) is RunErrorClass.TIMEOUT
+
+
+def test_classify_invoke_error_maps_google_api_core_resource_exhausted() -> None:
+    """Defense-in-depth: this class is never actually raised by the langchain-google-genai
+    seam in use (see the docstring), but is still checked in case a different Google client
+    lands on this seam."""
+    err = google_api_exceptions.ResourceExhausted("quota exceeded")
+    assert agent.classify_invoke_error(err) is RunErrorClass.RATE_LIMITED
+
+
+def test_classify_invoke_error_maps_google_api_core_deadline_exceeded() -> None:
+    err = google_api_exceptions.DeadlineExceeded("deadline exceeded")
+    assert agent.classify_invoke_error(err) is RunErrorClass.TIMEOUT
+
+
+def test_classify_invoke_error_maps_httpx_timeout() -> None:
+    """A bare network timeout below the HTTP-response level propagates unwrapped as
+    httpx.TimeoutException on the live Gemini-on-Vertex path (verified in
+    google/genai/_api_client.py's retry_args)."""
+    err = httpx.TimeoutException("read timed out")
+    assert agent.classify_invoke_error(err) is RunErrorClass.TIMEOUT
+
+
+def test_classify_invoke_error_maps_google_genai_server_error_504_to_timeout() -> None:
+    """The ACTUAL live-path type for a Vertex gateway timeout: google.genai.errors.ServerError
+    is not caught/wrapped by langchain_google_genai, so it reaches here directly."""
+    err = google_genai_errors.ServerError(504, {"message": "Deadline exceeded"})
+    assert agent.classify_invoke_error(err) is RunErrorClass.TIMEOUT
+
+
+def test_classify_invoke_error_treats_other_5xx_as_upstream_error() -> None:
+    err = google_genai_errors.ServerError(503, {"message": "Service unavailable"})
+    assert agent.classify_invoke_error(err) is RunErrorClass.UPSTREAM_ERROR
+
+
+def test_classify_invoke_error_maps_google_genai_client_error_429_directly() -> None:
+    """An unwrapped google.genai.errors.ClientError(429) classifies via the generic
+    status/code fallback, independent of the wrapper the next test exercises."""
+    err = google_genai_errors.ClientError(429, {"message": "Resource exhausted"})
+    assert agent.classify_invoke_error(err) is RunErrorClass.RATE_LIMITED
+
+
+def test_classify_invoke_error_unwraps_the_gemini_429_wrapper() -> None:
+    """THE live shape for a Vertex 429: langchain_google_genai.chat_models
+    ._handle_client_error catches the real ClientError(429) and re-raises
+    ChatGoogleGenerativeAIError with `from e` (verified in the installed 4.2.6 source) -
+    what run_agent/stream_agent_run actually catch is the wrapper, one __cause__ hop above
+    the classifiable error. classify_invoke_error must walk down to it."""
+    inner = google_genai_errors.ClientError(429, {"message": "Resource exhausted"})
+    try:
+        raise ChatGoogleGenerativeAIError(
+            "Error calling model 'gemini-2.5-flash' (RESOURCE_EXHAUSTED)."
+        ) from inner
+    except ChatGoogleGenerativeAIError as wrapper:
+        assert agent.classify_invoke_error(wrapper) is RunErrorClass.RATE_LIMITED
+
+
+def test_classify_invoke_error_walks_implicit_context_chain() -> None:
+    """A bare `raise` inside an `except` block (implicit chaining, no `from`) still links
+    via __context__; the walk must follow that too, not just an explicit __cause__."""
+
+    def _boom() -> None:
+        try:
+            request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+            raise anthropic.APITimeoutError(request=request)
+        except anthropic.APITimeoutError:
+            raise RuntimeError("agent loop failed")  # noqa: B904 - implicit chaining is the point
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _boom()
+    assert agent.classify_invoke_error(excinfo.value) is RunErrorClass.TIMEOUT
+
+
+class _FakeRetryWrapperError(Exception):
+    """A stand-in for a hypothetical future retry-wrapper type this codebase has never seen.
+
+    Not a real SDK class, deliberately: this test proves the generic status_code/code
+    duck-typed fallback (not an isinstance check), so an SDK upgrade that changes the
+    concrete wrapper type still classifies a 429 correctly as long as it exposes the code.
+    """
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__("wrapped upstream failure")
+        self.status_code = status_code
+
+
+def test_classify_invoke_error_generic_429_attribute_is_rate_limited() -> None:
+    assert agent.classify_invoke_error(_FakeRetryWrapperError(429)) is RunErrorClass.RATE_LIMITED
+
+
+def test_classify_invoke_error_defaults_to_upstream_error() -> None:
+    assert (
+        agent.classify_invoke_error(RuntimeError("vertex transport blew up"))
+        is RunErrorClass.UPSTREAM_ERROR
+    )
+
+
+# --- build_run_trace: error_class wiring -----------------------------------------
+def _run_meta() -> agent.RunMeta:
+    return agent.new_run("V-001", "Why is my shipment held?", None)
+
+
+def _draft_call(text: str = "Grounded draft.") -> ToolCallLog:
+    return ToolCallLog(
+        tool_name="draft_clearance_response",
+        input={"response_text": text},
+        output={"trace_id": "tr-x", "status": "drafted"},
+        duration_ms=5.0,
+        timestamp="2026-07-19T00:00:00+00:00",
+    )
+
+
+def test_build_run_trace_sets_error_class_on_an_errored_run() -> None:
+    trace = agent.build_run_trace(
+        _run_meta(), (), [], google_api_exceptions.ResourceExhausted("quota exceeded")
+    )
+    assert trace.error_class is RunErrorClass.RATE_LIMITED
+    assert trace.classification is not None
+    assert trace.classification.intent is InquiryIntent.ITERATION_CAP_EXCEEDED
+
+
+def test_build_run_trace_leaves_error_class_none_on_a_clean_run() -> None:
+    trace = agent.build_run_trace(_run_meta(), (_draft_call(),), [], None)
+    assert trace.draft_response == "Grounded draft."
+    assert trace.error_class is None
+
+
+def test_build_run_trace_leaves_error_class_none_on_a_plain_iteration_cap() -> None:
+    """No draft AND no invocation exception (the loop just ran out of tool calls to make) -
+    still ITERATION_CAP_EXCEEDED, but nothing to classify, so error_class stays None."""
+    trace = agent.build_run_trace(_run_meta(), (), [], None)
+    assert trace.classification is not None
+    assert trace.classification.intent is InquiryIntent.ITERATION_CAP_EXCEEDED
+    assert trace.error_class is None

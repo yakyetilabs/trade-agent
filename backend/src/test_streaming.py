@@ -14,7 +14,9 @@ from collections.abc import AsyncIterator, Iterator, Sequence
 from dataclasses import dataclass
 from typing import cast
 
+import httpx
 import pytest
+from google.api_core import exceptions as google_api_exceptions
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
@@ -30,6 +32,7 @@ from src.models import (
     ImportClassification,
     InquiryIntent,
     RestrictionLevel,
+    RunErrorClass,
     TraceDisposition,
     Vendor,
 )
@@ -210,6 +213,13 @@ def _capture_traces(monkeypatch: pytest.MonkeyPatch) -> list[object]:
     captured: list[object] = []
     monkeypatch.setattr(repository, "put_trace", captured.append)
     return captured
+
+
+def _trace_of(captured: list[object]) -> AgentTrace:
+    """Narrow one captured ``put_trace`` argument back to ``AgentTrace`` for typed access."""
+    trace = captured[0]
+    assert isinstance(trace, AgentTrace)
+    return trace
 
 
 def _vendor_exists(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -588,6 +598,8 @@ def test_unknown_vendor_streams_error_and_writes_no_trace(
 
 # --- Invoke failure degrades to a fallback draft, still one trace ---------------
 def test_stream_failure_degrades_to_fallback_done(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An UPSTREAM_ERROR-classified failure (an unrecognized exception) keeps today's
+    behavior: a terminal DoneEvent carrying the fallback draft, never an ErrorEvent."""
     _vendor_exists(monkeypatch)
     _stub_owner(monkeypatch, None)
     captured = _capture_traces(monkeypatch)
@@ -597,6 +609,7 @@ def test_stream_failure_degrades_to_fallback_done(monkeypatch: pytest.MonkeyPatc
 
     assert isinstance(events[0], RunStartedEvent)
     assert not any(isinstance(e, StageStartedEvent | StageCompletedEvent) for e in events)
+    assert not any(isinstance(e, ErrorEvent) for e in events)
     done = events[-1]
     assert isinstance(done, DoneEvent)
     assert done.result.draft_response == agent._FALLBACK_DRAFT
@@ -604,7 +617,48 @@ def test_stream_failure_degrades_to_fallback_done(monkeypatch: pytest.MonkeyPatc
     assert done.result.classification.intent is InquiryIntent.ITERATION_CAP_EXCEEDED
     assert "RuntimeError" in done.result.classification.reasoning
     assert done.result.tool_call_count == 0
+    assert done.result.error_class is RunErrorClass.UPSTREAM_ERROR
     assert len(captured) == 1  # a failed run still produces exactly one audit trace
+    assert _trace_of(captured).error_class is RunErrorClass.UPSTREAM_ERROR
+
+
+def test_stream_rate_limited_error_yields_error_event_not_done(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A RATE_LIMITED-classified failure is surfaced honestly as a terminal ErrorEvent -
+    the client never sees the generic fallback draft dressed up as a normal answer. The
+    trace is still persisted first (full audit), matching the sync path's ordering."""
+    _vendor_exists(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    captured = _capture_traces(monkeypatch)
+    err = google_api_exceptions.ResourceExhausted("quota exceeded")
+    _install_agent(monkeypatch, _FakeStreamingAgent(error=err))
+
+    events = _drain("V-001", "What is the duty rate for cotton t-shirts?")
+
+    assert [type(e).__name__ for e in events] == ["RunStartedEvent", "ErrorEvent"]
+    error = events[-1]
+    assert isinstance(error, ErrorEvent)
+    assert error.message == agent.RATE_LIMITED_CLIENT_MESSAGE
+    assert not any(isinstance(e, DoneEvent) for e in events)
+    assert len(captured) == 1
+    assert _trace_of(captured).error_class is RunErrorClass.RATE_LIMITED
+
+
+def test_stream_timeout_error_yields_error_event_not_done(monkeypatch: pytest.MonkeyPatch) -> None:
+    _vendor_exists(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    captured = _capture_traces(monkeypatch)
+    _install_agent(monkeypatch, _FakeStreamingAgent(error=httpx.TimeoutException("read timed out")))
+
+    events = _drain("V-001", "What is the duty rate for cotton t-shirts?")
+
+    assert [type(e).__name__ for e in events] == ["RunStartedEvent", "ErrorEvent"]
+    error = events[-1]
+    assert isinstance(error, ErrorEvent)
+    assert error.message == agent.TIMEOUT_CLIENT_MESSAGE
+    assert len(captured) == 1
+    assert _trace_of(captured).error_class is RunErrorClass.TIMEOUT
 
 
 # --- Real-graph smoke test (the streaming API + ContextVar boundary) ------------
@@ -835,6 +889,15 @@ def test_sse_format_emits_event_line_and_pure_data_payload() -> None:
     # The class-level event name rides the event: line only, not the JSON data payload.
     assert payload == {"trace_id": "tr-1", "vendor_id": "V-001", "model": "gemini-2.5-flash"}
     assert "event_name" not in payload
+
+
+def test_sse_format_error_event_keeps_total_tokens_off_the_wire() -> None:
+    """total_tokens is internal bookkeeping for the API layer's budget debit; the documented
+    client contract for the error event stays { message }."""
+    block = sse_format(ErrorEvent(message="rate limited", total_tokens=1234))
+    assert block.startswith("event: error\n")
+    payload = json.loads(next(line for line in block.splitlines() if line.startswith("data: "))[6:])
+    assert payload == {"message": "rate limited"}
 
 
 def test_sse_format_done_nests_the_full_result() -> None:

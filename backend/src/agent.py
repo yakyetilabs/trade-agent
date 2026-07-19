@@ -35,10 +35,15 @@ model-facing argument - the LLM has no slot to inject or override which vendor i
 import logging
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, NamedTuple
 
+import anthropic
+import httpx
+from google.api_core import exceptions as google_api_exceptions
+from google.genai import errors as google_genai_errors
 from langchain.agents import create_agent
 from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph.state import CompiledStateGraph
@@ -51,6 +56,7 @@ from src.models import (
     AgentTrace,
     ImportClassification,
     InquiryIntent,
+    RunErrorClass,
     ToolCallLog,
     TraceDisposition,
 )
@@ -179,6 +185,11 @@ class AgentResult(BaseModel):
     output_tokens: int | None = None
     thoughts_tokens: int | None = None
     total_tokens: int | None = None
+    # Projected from the trace; set only on a no-draft fallback caused by an invocation
+    # exception (see RunErrorClass). The API surfaces (src/app.py, src/streaming.py) branch
+    # on it to avoid silently returning a fallback draft when the model service is actually
+    # rate-limited or timing out.
+    error_class: RunErrorClass | None = None
 
 
 @dataclass(frozen=True)
@@ -445,6 +456,97 @@ def _sum_tokens(
     return _TokenUsage(prompt, output, thoughts, total) if found else None
 
 
+# Client-facing messages for the two error classes the API surfaces honestly instead of
+# returning the generic fallback draft as if it were a normal answer (see RunErrorClass).
+# Shared by the sync handler (src/app.py) and the streaming runner so the two surfaces
+# never drift.
+RATE_LIMITED_CLIENT_MESSAGE = (
+    "The model service is temporarily rate limited. Please try again in about a minute."
+)
+TIMEOUT_CLIENT_MESSAGE = "The model service timed out. Please try again."
+
+
+def _exception_chain(exc: BaseException) -> Iterator[BaseException]:
+    """Yield ``exc``, then each linked cause/context, stopping on a cycle or a dead end.
+
+    A retry wrapper's terminal exception is not always the one caught at the top: on a
+    Gemini 429, ``langchain_google_genai.chat_models._handle_client_error`` catches the
+    real ``google.genai.errors.ClientError`` and re-raises ``ChatGoogleGenerativeAIError``
+    with ``raise ... from e`` (verified in the installed 4.2.6 source), so the classifiable
+    error rides one ``__cause__`` hop below what ``run_agent``/``stream_agent_run`` catch.
+    ``__context__`` is also walked as a fallback for a bare ``raise`` inside an ``except``
+    block (implicit chaining, no explicit ``from``).
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def classify_invoke_error(exc: Exception) -> RunErrorClass:
+    """Classify an agent-loop invocation failure for the no-draft fallback trace.
+
+    Mapped against the INSTALLED library sources in ``backend/.venv`` (not memory) for both
+    provider seams bound in ``src/model_provider.py``:
+
+    Gemini on Vertex (``langchain-google-genai`` 4.2.6 + ``google-genai`` 2.10.0, the
+    production path, ``vertexai=True``): ``ChatGoogleGenerativeAI`` talks to Vertex through
+    ``google.genai.client.Client``'s HTTP transport, NOT the older gRPC/``google-api-core``
+    Vertex AI SDK - so a live 429 or 5xx from this call path never actually raises
+    ``google.api_core.exceptions.ResourceExhausted``/``DeadlineExceeded``. Those two classes
+    are still checked below (harmless, cheap) as defense-in-depth for a different Google
+    client ever landing on this seam, but they are not what fires today. The real terminal
+    types, confirmed in ``google/genai/_api_client.py`` and ``google/genai/errors.py``:
+      - The client's retry loop is ``tenacity.Retrying``/``AsyncRetrying`` configured with
+        ``reraise=True`` (``retry_args`` in ``_api_client.py``), so retry exhaustion always
+        re-raises the LAST attempt's real exception - never a ``tenacity.RetryError``
+        wrapper. No unwrapping of a tenacity wrapper is needed on this path.
+      - A 429 raises ``google.genai.errors.ClientError`` (``.code == 429``, an ``APIError``
+        subclass). ``langchain_google_genai.chat_models._handle_client_error`` (all four
+        call sites: generate/agenerate/stream/astream) catches it and re-raises
+        ``ChatGoogleGenerativeAIError`` with ``from e`` - so the 429 is one cause-hop down
+        (handled by ``_exception_chain`` above).
+      - A 5xx (``ServerError``, e.g. the 504 gateway-timeout case) is NOT caught by that
+        handler and propagates UNWRAPPED as ``google.genai.errors.ServerError``.
+      - A bare network timeout/connect failure below the HTTP-response level propagates
+        UNWRAPPED as ``httpx.TimeoutException``/``httpx.ConnectError`` (both retryable per
+        ``retry_args``, so this is also only reached after retries are exhausted).
+
+    Direct Anthropic API (``anthropic`` 0.117.0 via ``langchain-anthropic`` 1.4.8): the
+    SDK's own retry loop (``anthropic/_base_client.py``) raises the concrete typed error
+    directly on exhaustion - ``anthropic.RateLimitError`` (``status_code == 429``) or
+    ``anthropic.APITimeoutError`` - with no wrapper; ``langchain_anthropic`` only intercepts
+    ``BadRequestError`` (context-length handling), so both propagate unwrapped.
+
+    Given the above, the isinstance checks below are the exact confirmed types; the trailing
+    generic ``status_code``/``code`` == 429 check is what actually classifies the live
+    Gemini 429 case (a ``ChatGoogleGenerativeAIError`` whose ``__cause__`` is the
+    ``ClientError``), and is deliberately duck-typed so a future SDK upgrade that changes
+    the concrete wrapper type still classifies correctly as long as it exposes the status.
+    """
+    for candidate in _exception_chain(exc):
+        if isinstance(candidate, anthropic.APITimeoutError):
+            return RunErrorClass.TIMEOUT
+        if isinstance(candidate, google_api_exceptions.DeadlineExceeded):
+            return RunErrorClass.TIMEOUT
+        if isinstance(candidate, google_genai_errors.APIError) and candidate.code == 504:
+            return RunErrorClass.TIMEOUT
+        if isinstance(candidate, httpx.TimeoutException):
+            return RunErrorClass.TIMEOUT
+        if isinstance(candidate, anthropic.RateLimitError):
+            return RunErrorClass.RATE_LIMITED
+        if isinstance(candidate, google_api_exceptions.ResourceExhausted):
+            return RunErrorClass.RATE_LIMITED
+        status = getattr(candidate, "status_code", None)
+        if status is None:
+            status = getattr(candidate, "code", None)
+        if status == 429:
+            return RunErrorClass.RATE_LIMITED
+    return RunErrorClass.UPSTREAM_ERROR
+
+
 def build_run_trace(
     meta: RunMeta,
     tool_calls: tuple[ToolCallLog, ...],
@@ -477,6 +579,13 @@ def build_run_trace(
         )
         draft_response = _FALLBACK_DRAFT
 
+    # error_class is set only when an actual invocation exception fired - never on a plain
+    # iteration-cap exhaustion (the loop ran to the recursion limit with no error) or a
+    # healthy run. It is what the API surfaces read to decide whether to keep returning
+    # this fallback draft as-is (UPSTREAM_ERROR) or surface the condition honestly instead
+    # (RATE_LIMITED, TIMEOUT) - see RATE_LIMITED_CLIENT_MESSAGE / TIMEOUT_CLIENT_MESSAGE.
+    error_class = classify_invoke_error(invoke_error) if invoke_error is not None else None
+
     draft_actionable = _is_draft_actionable(classification, tool_calls, draft_response)
     usage = _sum_tokens(result_messages, tool_calls)
     return AgentTrace(
@@ -492,6 +601,7 @@ def build_run_trace(
         disposition=TraceDisposition.DRAFT,
         model=meta.model,
         duration_ms=_elapsed_ms(meta),
+        error_class=error_class,
         prompt_tokens=usage.prompt_tokens if usage else None,
         output_tokens=usage.output_tokens if usage else None,
         thoughts_tokens=usage.thoughts_tokens if usage else None,
@@ -517,6 +627,7 @@ def persist_result(trace: AgentTrace) -> AgentResult:
         output_tokens=trace.output_tokens,
         thoughts_tokens=trace.thoughts_tokens,
         total_tokens=trace.total_tokens,
+        error_class=trace.error_class,
     )
 
 

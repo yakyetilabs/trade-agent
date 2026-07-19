@@ -22,7 +22,9 @@ the Layer-2 model-output deltas (the streaming contract is documented in
 - ``guard_triggered````{ kind, reason }`` - a deterministic pre-model guard fired; the model
   never ran. Terminal for the pipeline, still followed by ``done`` (the guard is audited too).
 - ``done``           ``{ result }`` - the full :class:`~src.agent.AgentResult`; closes the run.
-- ``error``          ``{ message }`` - an unknown vendor or an unexpected failure; terminal.
+- ``error``          ``{ message }`` - an unknown vendor, an unexpected failure, or (after the
+  trace is already persisted) a model-service RATE_LIMITED/TIMEOUT condition surfaced
+  honestly instead of the generic fallback draft; terminal.
 
 Transport (verified at build time against langchain-core 1.4): the trace ``ContextVar`` and
 the vendor runtime context both propagate into the synchronous tools when the graph runs
@@ -35,11 +37,13 @@ from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import ClassVar, Literal
 
 from langchain_core.messages import BaseMessage, HumanMessage
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from src import repository
 from src.agent import (
+    RATE_LIMITED_CLIENT_MESSAGE,
     RECURSION_LIMIT,
+    TIMEOUT_CLIENT_MESSAGE,
     AgentResult,
     GuardKind,
     build_agent,
@@ -48,7 +52,7 @@ from src.agent import (
     persist_result,
     run_pre_model_guards,
 )
-from src.models import ToolCallLog
+from src.models import RunErrorClass, ToolCallLog
 from src.tracing.trace_context import trace_context
 
 _logger = logging.getLogger(__name__)
@@ -181,10 +185,19 @@ class DoneEvent(_StreamEvent):
 
 
 class ErrorEvent(_StreamEvent):
-    """Terminal failure: an unknown vendor or an unexpected error while processing."""
+    """Terminal failure: an unknown vendor, an unexpected error while processing, or a
+    model-service RATE_LIMITED/TIMEOUT condition surfaced honestly (see stream_agent_run).
+
+    ``total_tokens`` is internal-only bookkeeping for the API layer: a rate-limited or
+    timed-out run may still have consumed tokens (the classifier call, early loop turns)
+    that must settle against the caller's TPM budget even though no ``done`` event closes
+    the stream. ``exclude=True`` keeps it OFF the SSE wire - the documented client event
+    contract for ``error`` stays ``{ message }``.
+    """
 
     event_name: ClassVar[str] = "error"
     message: str
+    total_tokens: int | None = Field(default=None, exclude=True)
 
 
 StreamEvent = (
@@ -331,7 +344,19 @@ async def stream_agent_run(
         # persists None (not ""), matching the synchronous path.
         thinking_content = "".join(thinking_parts) or None
         trace = build_run_trace(meta, tool_calls, result_messages, invoke_error, thinking_content)
-        yield DoneEvent(result=persist_result(trace))
+        # persist_result writes the audit trace FIRST, regardless of what is yielded next -
+        # the audit trail stays complete even when the client sees an error instead of the
+        # fallback draft (mirrors the sync path's ordering in src/app.py).
+        result = persist_result(trace)
+        # The error events carry the run's consumed tokens as an internal (wire-excluded)
+        # field so the API layer can settle the TPM budget - parity with the sync path,
+        # which debits before raising its 503.
+        if trace.error_class is RunErrorClass.RATE_LIMITED:
+            yield ErrorEvent(message=RATE_LIMITED_CLIENT_MESSAGE, total_tokens=result.total_tokens)
+        elif trace.error_class is RunErrorClass.TIMEOUT:
+            yield ErrorEvent(message=TIMEOUT_CLIENT_MESSAGE, total_tokens=result.total_tokens)
+        else:
+            yield DoneEvent(result=result)
     except Exception:  # noqa: BLE001 - last resort: never leak an uncaught error mid-stream
         _logger.exception("stream_agent_run failed for trace %s", meta.trace_id)
         yield ErrorEvent(message="Internal error while processing the inquiry.")

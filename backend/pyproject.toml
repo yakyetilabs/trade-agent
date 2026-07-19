@@ -24,12 +24,16 @@ dependencies = [
     # Direct-API Claude binding for the eval comparison arms (dashed "claude-*" ids in
     # src/model_provider.py); the Vertex Claude arm rides the [anthropic] extra above.
     "langchain-anthropic>=1.4.8",
+    # Both were already transitive (google-genai's HTTP transport, langchain-google-genai's
+    # retry ladder pulls in google-api-core via google-cloud-firestore) but are now imported
+    # directly in src/agent.py's classify_invoke_error, so they are declared explicitly.
+    "httpx>=0.27",
+    "google-api-core>=2.31",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.2",
-    "httpx>=0.27",
     "ruff>=0.5",
     "pyright>=1.1.370",
 ]

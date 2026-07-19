@@ -2801,8 +2801,10 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },
+    { name = "google-api-core" },
     { name = "google-cloud-firestore" },
     { name = "google-genai" },
+    { name = "httpx" },
     { name = "langchain" },
     { name = "langchain-anthropic" },
     { name = "langchain-google-genai" },
@@ -2814,7 +2816,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "ruff" },
@@ -2823,8 +2824,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115" },
+    { name = "google-api-core", specifier = ">=2.31" },
     { name = "google-cloud-firestore", specifier = ">=2.16" },
     { name = "google-genai", specifier = ">=2.10.0" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "langchain", specifier = ">=1.0" },
     { name = "langchain-anthropic", specifier = ">=1.4.8" },
     { name = "langchain-google-genai", specifier = ">=4.2.6" },
@@ -2836,7 +2839,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.27" },
     { name = "pyright", specifier = ">=1.1.370" },
     { name = "pytest", specifier = ">=8.2" },
     { name = "ruff", specifier = ">=0.5" },

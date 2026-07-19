@@ -18,11 +18,12 @@ from src.models import (
     GoodsCategory,
     ImportClassification,
     InquiryIntent,
+    RunErrorClass,
     TraceDisposition,
     Vendor,
 )
 from src.ratelimit import RateLimiter
-from src.streaming import DoneEvent, RunStartedEvent, StreamEvent
+from src.streaming import DoneEvent, ErrorEvent, RunStartedEvent, StreamEvent
 
 _VENDOR = Vendor(
     vendor_id="V-001",
@@ -148,6 +149,69 @@ def test_inquiry_unknown_vendor_maps_to_404(
     resp = client.post("/api/inquiry", json={"vendor_id": "V-404", "inquiry": "anything"})
     assert resp.status_code == 404
     assert "V-404" in resp.json()["detail"]
+
+
+def test_inquiry_rate_limited_result_maps_to_503_with_retry_after(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A RATE_LIMITED-classified run is surfaced honestly instead of returning the fallback
+    draft as if it were a normal answer - the trade-off documented in src/app.py."""
+    limited = _RESULT.model_copy(update={"error_class": RunErrorClass.RATE_LIMITED})
+    monkeypatch.setattr(app_module, "run_agent", lambda *_a, **_k: limited)
+
+    resp = client.post("/api/inquiry", json={"vendor_id": "V-001", "inquiry": "anything"})
+
+    assert resp.status_code == 503
+    assert resp.headers["Retry-After"] == "60"
+    assert "rate limited" in resp.json()["detail"].lower()
+
+
+def test_inquiry_timeout_result_maps_to_503(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    timed_out = _RESULT.model_copy(update={"error_class": RunErrorClass.TIMEOUT})
+    monkeypatch.setattr(app_module, "run_agent", lambda *_a, **_k: timed_out)
+
+    resp = client.post("/api/inquiry", json={"vendor_id": "V-001", "inquiry": "anything"})
+
+    assert resp.status_code == 503
+    assert "timed out" in resp.json()["detail"].lower()
+
+
+def test_inquiry_upstream_error_result_still_returns_200(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """UPSTREAM_ERROR keeps today's behavior: the fallback draft rides a normal 200, not
+    a 503 - only RATE_LIMITED/TIMEOUT are surfaced as a hard failure."""
+    degraded = _RESULT.model_copy(update={"error_class": RunErrorClass.UPSTREAM_ERROR})
+    monkeypatch.setattr(app_module, "run_agent", lambda *_a, **_k: degraded)
+
+    resp = client.post("/api/inquiry", json={"vendor_id": "V-001", "inquiry": "anything"})
+
+    assert resp.status_code == 200
+    assert resp.json()["trace_id"] == "tr-abc"
+
+
+def test_inquiry_rate_limited_still_debits_consumed_tokens(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tokens may have been consumed even on a degraded run - the debit happens before the
+    503 is raised, so a rate-limited run still costs against the caller's TPM budget. 12k
+    overshoots the 10k budget (mirrors test_inquiry_debits_actual_tokens_against_the_tpm_budget),
+    so the following request is refused until refill."""
+    _install_limiter(monkeypatch, requests_per_window=100, tokens_per_window=10_000)
+    limited = _RESULT.model_copy(
+        update={"error_class": RunErrorClass.RATE_LIMITED, "total_tokens": 12_000}
+    )
+    monkeypatch.setattr(app_module, "run_agent", lambda *_a, **_k: limited)
+
+    body = {"vendor_id": "V-001", "inquiry": "anything"}
+    assert client.post("/api/inquiry", json=body).status_code == 503
+
+    monkeypatch.setattr(app_module, "run_agent", lambda *_a, **_k: _RESULT)
+    resp = client.post("/api/inquiry", json=body)
+    assert resp.status_code == 429  # the 12k overshoot already exhausted the 10k budget
+    assert resp.headers["X-RateLimit-Remaining-Tokens"] == "0"
 
 
 def test_inquiry_rejects_malformed_vendor_id(
@@ -347,6 +411,29 @@ def test_stream_debits_tokens_and_carries_rate_limit_headers(
     assert first.headers["X-RateLimit-Limit-Tokens"] == "10000"
     # The done event's total_tokens were debited when the stream closed.
     assert client.post("/api/inquiry/stream", json=body).status_code == 429
+
+
+def test_stream_debits_tokens_from_a_terminal_error_event(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A RATE_LIMITED run ends in an ErrorEvent instead of DoneEvent, but the tokens it
+    consumed before dying still settle against the caller's budget (parity with the sync
+    path, which debits before raising its 503)."""
+    _install_limiter(monkeypatch, requests_per_window=100, tokens_per_window=10_000)
+
+    async def fake_stream(
+        vendor_id: str, inquiry: str, model_id: str | None = None
+    ) -> AsyncIterator[StreamEvent]:
+        yield RunStartedEvent(trace_id="tr-abc", vendor_id=vendor_id, model="gemini-2.5-flash")
+        yield ErrorEvent(message="The model service is rate limited.", total_tokens=12_000)
+
+    monkeypatch.setattr(app_module, "stream_agent_run", fake_stream)
+
+    body = {"vendor_id": "V-001", "inquiry": "Why is S-1001 held?"}
+    assert client.post("/api/inquiry/stream", json=body).status_code == 200
+    resp = client.post("/api/inquiry/stream", json=body)
+    assert resp.status_code == 429
+    assert resp.headers["X-RateLimit-Remaining-Tokens"] == "0"
 
 
 def test_rate_limit_keys_on_the_rightmost_forwarded_ip(
