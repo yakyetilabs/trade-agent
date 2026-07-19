@@ -246,9 +246,13 @@ def test_normal_run_extracts_classification_draft_and_tokens(
         "retrieve_tariff_regulation",
         "draft_clearance_response",
     ]
-    # Vendor scope is bound into runtime context, never a model-facing arg; the cap is applied.
+    # Vendor scope and the run's model binding ride in runtime context, never a
+    # model-facing arg; the cap is applied.
     assert fake.invoked_with is not None
-    assert fake.invoked_with["context"] == {"vendor_id": "V-001"}
+    assert fake.invoked_with["context"] == {
+        "vendor_id": "V-001",
+        "model_id": agent.VERTEX_PRIMARY_MODEL,
+    }
     assert fake.invoked_with["config"] == {"recursion_limit": agent.RECURSION_LIMIT}
     # Exactly one trace persisted, carrying the embedded tool calls and token split.
     assert len(captured) == 1
@@ -311,6 +315,40 @@ def test_token_split_folds_thoughts_and_sums_across_messages(
     assert len(captured) == 1
     assert captured[0].thoughts_tokens == 35
     assert captured[0].output_tokens == 110
+
+
+def test_token_split_includes_tool_internal_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tool-internal model call's recorded ``usage`` folds into the run's billable split.
+
+    The classifier records its structured-output call's usage on the trace (see
+    classify_import_restriction); the run totals must cover it, or every cost figure
+    understates the true billable spend by one model call.
+    """
+    _vendor_exists(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    captured = _capture_traces(monkeypatch)
+
+    classify = _classify_spec()
+    classify.output["usage"] = {"input_tokens": 300, "output_tokens": 60, "total_tokens": 360}
+    fake = _FakeAgent(
+        calls=[classify, _draft_spec("Grounded draft citing HTS 8517.13.0000.")],
+        messages=[
+            AIMessage(
+                content="done",
+                usage_metadata={"input_tokens": 100, "output_tokens": 40, "total_tokens": 140},
+            )
+        ],
+    )
+    _install_agent(monkeypatch, fake)
+
+    result = agent.run_agent("V-001", "What duty applies to my declared electronics?")
+
+    assert result.prompt_tokens == 400  # 100 loop + 300 classifier
+    assert result.output_tokens == 100  # 40 loop + 60 classifier
+    assert result.total_tokens == 500
+    assert result.prompt_tokens + result.output_tokens == result.total_tokens
+    assert len(captured) == 1
+    assert captured[0].prompt_tokens == 400
 
 
 # --- Actionability: a drafted "no shipments found" note is not releasable ---------
@@ -444,3 +482,21 @@ def test_build_agent_binds_vendor_context_and_the_four_tools(
         "retrieve_tariff_regulation",
         "draft_clearance_response",
     }
+
+
+def test_system_prompt_carries_the_cross_model_tool_mandates() -> None:
+    """The prompt lines that keep every model arm on the tool rails stay present.
+
+    Load-bearing for the non-Gemini eval arms: without the TOOL PROTOCOL block, Claude
+    models call tools in parallel and answer in prose instead of drafting (observed live
+    2026-07-18), so a run ends with no draft and degrades to the fallback. Pinning the
+    key phrases keeps a future prompt edit from silently dropping the mandates.
+    """
+    prompt = agent._SYSTEM_PROMPT
+    # Sequencing: classifier first, one tool per turn, never parallel.
+    assert "ALWAYS call this first" in prompt
+    assert "exactly ONE tool per turn" in prompt
+    assert "NEVER call two tools in parallel" in prompt
+    # Delivery: the draft tool is the only answer channel; a prose ending is a failure.
+    assert "ONLY way to deliver your answer" in prompt
+    assert "ends in plain text" in prompt

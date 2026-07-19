@@ -278,13 +278,14 @@ async def stream_agent_run(
                 async for event in agent.astream_events(
                     {"messages": [HumanMessage(content=inquiry)]},
                     config={"recursion_limit": RECURSION_LIMIT},
-                    context={"vendor_id": vendor_id},
+                    context={"vendor_id": vendor_id, "model_id": meta.model},
                     version="v2",
                 ):
                     kind = event.get("event")
-                    # The root graph's final state carries the agent-loop messages, which the
-                    # token sum needs (and which exclude any tool-internal model call). The root
-                    # is the only chain event with no parent - name-independent identification.
+                    # The root graph's final state carries the agent-loop messages the token sum
+                    # reads (tool-internal model calls contribute separately, via the usage they
+                    # record on the trace). The root is the only chain event with no parent -
+                    # name-independent identification.
                     if kind == "on_chain_end" and not event.get("parent_ids"):
                         data = event.get("data")
                         output = data.get("output") if isinstance(data, dict) else None

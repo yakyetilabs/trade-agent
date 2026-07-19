@@ -33,6 +33,8 @@ def test_build_chat_model_configures_vertex_gemini(monkeypatch: pytest.MonkeyPat
     # vertexai=True is load-bearing: Vertex ADC, not the Gemini Developer API key path.
     # Default (no streaming): no thinking config is sent at all - a plain chat model.
     # max_retries=8 stretches 429 backoff past a per-minute quota window (~123s).
+    # timeout (seconds) bounds each attempt so a dead socket errors into that retry
+    # ladder instead of hanging the run forever.
     assert captured == {
         "model": "gemini-2.5-flash",
         "vertexai": True,
@@ -40,6 +42,7 @@ def test_build_chat_model_configures_vertex_gemini(monkeypatch: pytest.MonkeyPat
         "location": GCP_REGION,
         "temperature": 0.0,
         "max_retries": 8,
+        "timeout": 120.0,
     }
 
 
@@ -84,13 +87,16 @@ def test_build_chat_model_binds_dashed_claude_ids_to_direct_api(
     # A first-party dashed id selects the direct-API fallback arm: same pinned
     # temperature and output cap as the Vertex form, no thinking config (see above).
     # Keys are the pydantic alias spellings (model_name = model, max_tokens_to_sample
-    # = max_tokens); timeout/stop are the explicit class defaults.
+    # = max_tokens); stop is the explicit class default, max_retries stretches the
+    # SDK's short default backoff across a rate-limit refill window, and timeout
+    # replaces the class default of NO HTTP timeout with a per-attempt cap.
     assert captured == {
         "model_name": "claude-haiku-4-5-20251001",
         "api_key": SecretStr("test-key"),
         "temperature": 0.0,
         "max_tokens_to_sample": 4096,
-        "timeout": None,
+        "max_retries": 8,
+        "timeout": 120.0,
         "stop": None,
     }
 

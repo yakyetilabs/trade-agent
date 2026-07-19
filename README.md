@@ -132,11 +132,13 @@ Hand-curated cases cover 6 capability categories:
 - **Escalation triggers**: contraband, sanctions, and federal-seizure signals must short-circuit pre-model with zero tool calls.
 - **Scope violations**: three distinct cross-tenant leak vectors must be refused deterministically.
 
-The scorer asserts disposition, tool sequence, citation grounding, and phrasing; the runner compares the production model against a stronger evaluation model to keep the cost/latency choice honest:
+The scorer asserts disposition, tool sequence, citation grounding, and phrasing; the runner binds any of four models through the provider seam - Gemini Flash and Pro, Claude Haiku and Sonnet - a provider-by-tier matrix that keeps the production cost/latency choice honest:
 
 ```bash
 cd backend && uv run --env-file .env python -m eval.run_eval
 ```
+
+The aggregated comparison - accuracy, latency, classifier confidence, and per-inquiry unit economics across three full matrix passes, with mechanical data-integrity rules - is the tracked **[evaluation report](docs/EVAL_REPORT.md)**.
 
 Suite integrity is itself unit-tested: every cited shipment id must exist in the synthetic seed and belong to the case's vendor, so the suite cannot silently drift from the data.
 

@@ -28,6 +28,14 @@ from pydantic import SecretStr
 
 from src.config import ANTHROPIC_API_KEY, ANTHROPIC_VERTEX_REGION, GCP_PROJECT, GCP_REGION
 
+# Per-attempt cap on both chat bindings, generous for the slowest single generation.
+# Without it neither arm has a client-side deadline: a mid-request network drop left an
+# eval pass hung >20 min on a dead socket (observed live 2026-07-18) - no error surfaced,
+# so retries never fired. Both SDKs treat a timeout as retryable (google-genai retries
+# httpx.TimeoutException, the Anthropic SDK its APITimeoutError), so the max_retries
+# ladders below still apply on top of this cap.
+_REQUEST_TIMEOUT_SECONDS: float = 120.0
+
 
 def build_chat_model(model_id: str, *, stream_thoughts: bool = False) -> BaseChatModel:
     """Construct a fresh chat model for ``model_id``, configured for this deployment.
@@ -69,13 +77,18 @@ def build_chat_model(model_id: str, *, stream_thoughts: bool = False) -> BaseCha
             )
         # Alias spellings (model_name/max_tokens_to_sample/timeout/stop are pydantic
         # aliases of model/max_tokens/default_request_timeout/stop_sequences) - the
-        # form pyright validates; None values are the class defaults, made explicit.
+        # form pyright validates; stop=None is the class default, made explicit.
+        # max_retries: the SDK default of 2 gives up in seconds; 8 rides out a
+        # depleted per-minute rate-limit window, mirroring the Gemini arm below.
+        # timeout: overrides the class default of None (no HTTP timeout) with the
+        # shared per-attempt cap defined above.
         return ChatAnthropic(
             model_name=model_id,
             api_key=SecretStr(ANTHROPIC_API_KEY),
             temperature=0.0,
             max_tokens_to_sample=4096,
-            timeout=None,
+            max_retries=8,
+            timeout=_REQUEST_TIMEOUT_SECONDS,
             stop=None,
         )
     kwargs: dict[str, object] = {
@@ -89,6 +102,8 @@ def build_chat_model(model_id: str, *, stream_thoughts: bool = False) -> BaseCha
         # default of 6 tops out near ~31s, which dies inside the same window (429s
         # observed live 2026-07-18 degrading eval runs to fallback drafts).
         "max_retries": 8,
+        # Seconds here; the wrapper converts to HttpOptions milliseconds per attempt.
+        "timeout": _REQUEST_TIMEOUT_SECONDS,
     }
     if stream_thoughts:
         kwargs["include_thoughts"] = True

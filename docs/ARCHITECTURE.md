@@ -77,6 +77,7 @@ The loop is built with `langchain.agents.create_agent` (LangChain 1.0) in [`back
 - **Deterministic sampling.** `temperature=0`; grounding is enforced by the prompt and tools, not by sampling luck.
 - **Provider seam.** [`backend/src/model_provider.py`](../backend/src/model_provider.py) is the single place a concrete provider is bound (Gemini on Vertex today, `vertexai=True`, ADC credentials).
   Everything downstream depends on the abstract chat-model interface and langchain-core's standardized `usage_metadata`, so a provider swap is confined to that module plus a config id.
+  The seam is proven, not just asserted: the evaluation harness binds four models through it - Gemini Flash and Pro, Claude Haiku and Sonnet - with nothing else varying; the resulting comparison is [EVAL_REPORT.md](EVAL_REPORT.md).
 
 ### The four tools
 

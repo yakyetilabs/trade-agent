@@ -75,6 +75,19 @@ def test_embed_documents_returns_one_vector_per_doc_with_document_task_type(
     assert config.task_type == "RETRIEVAL_DOCUMENT"
 
 
+def test_embed_bounds_each_call_with_a_request_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _install_fake(monkeypatch)
+
+    embeddings_mod.VertexEmbeddings().embed_query("x")
+
+    # A dead socket must error, not hang the caller; HttpOptions.timeout is milliseconds.
+    config = cast("EmbedContentConfig", client.models.calls[0]["config"])
+    assert config.http_options is not None
+    assert config.http_options.timeout == 30_000
+
+
 def test_embed_raises_when_values_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _install_fake(monkeypatch)
 

@@ -49,6 +49,7 @@ node_modules/
 *credentials*.json
 
 # Local agent/tooling config - kept local, never committed
+run_matrix.local.sh
 CLAUDE.md
 CLAUDE.local.md
 # Detailed session history moved off CLAUDE.local.md's auto-load path

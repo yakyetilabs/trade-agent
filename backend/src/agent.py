@@ -84,6 +84,9 @@ _CROSS_VENDOR_REFUSAL_DRAFT = (
     "vendor and shipments."
 )
 
+# The TOOL PROTOCOL block is load-bearing for the non-Gemini eval arms: without it, Claude
+# models call tools in parallel and deliver the answer as plain prose instead of calling the
+# draft tool (observed live 2026-07-18), which the no-draft fallback scores as a failed run.
 _SYSTEM_PROMPT = """\
 You are a US trade-compliance assistant for a single authorized vendor. \
 You help an analyst understand why imports are held or flagged and draft an official clearance \
@@ -99,6 +102,18 @@ goods, to fetch the current vendor's shipments and their declared manifest lines
 any looked-up HTS codes, to pull the relevant Harmonized Tariff Schedule (HTS) clauses.
 4. draft_clearance_response - call this EXACTLY ONCE, at the very end. Your task is complete once \
 you have called it; do not call any tool afterward.
+
+TOOL PROTOCOL - these mechanics are mandatory:
+- Call exactly ONE tool per turn, then wait for its result before choosing your next action. \
+NEVER call two tools in parallel: each call's input must be derived from the previous call's \
+actual output (the retrieval query from the classification, the draft from looked-up shipment \
+ids), so parallel calls cannot be grounded.
+- draft_clearance_response is the ONLY way to deliver your answer. The analyst never sees this \
+conversation - only the draft recorded by that tool. A run that ends in plain text without \
+calling it FAILS and its work is discarded. That includes "no shipments found" and "code not on \
+record" outcomes: state those findings inside the draft itself, then call the tool.
+- After draft_clearance_response returns status "drafted", reply with one short confirmation \
+sentence and stop.
 
 GROUNDING DISCIPLINE - this is the load-bearing part:
 - After each tool call, restate what it ACTUALLY returned (counts, shipment_ids, hts_codes, \
@@ -369,11 +384,11 @@ def _is_draft_actionable(
 
 
 class _TokenUsage(NamedTuple):
-    """The run's billable token split, summed across its AI messages.
+    """The run's billable token split, summed across every model call it made.
 
-    Read from each message's standardized ``usage_metadata`` (langchain-core), so the
-    accounting is provider-neutral: ``input_tokens`` is the prompt cost, ``output_tokens``
-    the full generated cost. On Vertex thinking bills at the OUTPUT rate, so ``output_tokens``
+    Read from the standardized ``usage_metadata`` (langchain-core), so the accounting is
+    provider-neutral: ``input_tokens`` is the prompt cost, ``output_tokens`` the full
+    generated cost. On Vertex thinking bills at the OUTPUT rate, so ``output_tokens``
     already folds in any reasoning tokens and ``prompt + output == total`` holds. When the
     provider exposes a reasoning sub-split - Gemini reports it under
     ``output_token_details.reasoning`` - ``thoughts_tokens`` surfaces it for the cost view;
@@ -386,16 +401,26 @@ class _TokenUsage(NamedTuple):
     total_tokens: int
 
 
-def _sum_tokens(messages: list[BaseMessage]) -> _TokenUsage | None:
-    """Aggregate the billable token split across the run's AI messages.
+def _usage_int(usage: dict[str, object] | dict[str, int], key: str) -> int:
+    """Read one integer field from a usage mapping; anything non-int reads as 0."""
+    value = usage.get(key, 0)
+    return value if isinstance(value, int) else 0
 
-    ``None`` when no message carried usage (e.g. a faked or usage-less run), which keeps
-    the trace's token fields ``None`` rather than a misleading all-zero split.
 
-    The ``messages`` are the agent graph's final ``state["messages"]`` (the streaming
-    runner captures the same list from the root ``on_chain_end`` event), so a tool's own
-    internal model call - e.g. ``classify_import_restriction``'s structured-output call -
-    is excluded from the sum, exactly as on the synchronous path.
+def _sum_tokens(
+    messages: list[BaseMessage], tool_calls: tuple[ToolCallLog, ...] = ()
+) -> _TokenUsage | None:
+    """Aggregate the billable token split across every model call in the run.
+
+    Two sources, so the split is the run's true billable cost, not just the loop's:
+
+    - the agent graph's final ``state["messages"]`` (each AI message's usage; the
+      streaming runner captures the same list from the root ``on_chain_end`` event);
+    - any tool-internal model call that recorded its ``usage`` on the trace - the
+      classifier's structured-output call does (see ``classify_import_restriction``).
+
+    ``None`` when neither source carried usage (e.g. a faked or usage-less run), which
+    keeps the trace's token fields ``None`` rather than a misleading all-zero split.
     """
     prompt = output = thoughts = total = 0
     found = False
@@ -404,11 +429,19 @@ def _sum_tokens(messages: list[BaseMessage]) -> _TokenUsage | None:
         if not usage:
             continue
         found = True
-        prompt += int(usage.get("input_tokens", 0))
-        output += int(usage.get("output_tokens", 0))
-        total += int(usage.get("total_tokens", 0))
+        prompt += _usage_int(usage, "input_tokens")
+        output += _usage_int(usage, "output_tokens")
+        total += _usage_int(usage, "total_tokens")
         # Populated when the provider exposes a reasoning sub-split (Gemini does); else 0.
         thoughts += int((usage.get("output_token_details") or {}).get("reasoning", 0))
+    for call in tool_calls:
+        tool_usage = call.output.get("usage")
+        if not isinstance(tool_usage, dict):
+            continue
+        found = True
+        prompt += _usage_int(tool_usage, "input_tokens")
+        output += _usage_int(tool_usage, "output_tokens")
+        total += _usage_int(tool_usage, "total_tokens")
     return _TokenUsage(prompt, output, thoughts, total) if found else None
 
 
@@ -445,7 +478,7 @@ def build_run_trace(
         draft_response = _FALLBACK_DRAFT
 
     draft_actionable = _is_draft_actionable(classification, tool_calls, draft_response)
-    usage = _sum_tokens(result_messages)
+    usage = _sum_tokens(result_messages, tool_calls)
     return AgentTrace(
         trace_id=meta.trace_id,
         timestamp=meta.timestamp,
@@ -518,7 +551,7 @@ def run_agent(vendor_id: str, inquiry: str, model_id: str | None = None) -> Agen
             output = agent.invoke(
                 {"messages": [HumanMessage(content=inquiry)]},
                 config={"recursion_limit": RECURSION_LIMIT},
-                context={"vendor_id": vendor_id},
+                context={"vendor_id": vendor_id, "model_id": meta.model},
             )
             result_messages = list(output.get("messages", []))
         except Exception as exc:  # noqa: BLE001 - any loop failure degrades to a fallback draft

@@ -6,11 +6,15 @@ single-dense retrieval path: see the Retrieval section (§8) in
 ``docs/DESIGN_DECISIONS.md``.
 """
 
-from google.genai.types import EmbedContentConfig
+from google.genai.types import EmbedContentConfig, HttpOptions
 from langchain_core.embeddings import Embeddings
 
 from src.config import VERTEX_EMBEDDING_DIM, VERTEX_EMBEDDING_MODEL
 from src.gcp.client import get_genai_client
+
+# Milliseconds (the HttpOptions unit). Caps each embed call so a dead socket errors
+# instead of hanging retrieval - and any request or eval run above it - indefinitely.
+_EMBED_TIMEOUT_MS: int = 30_000
 
 
 class VertexEmbeddings(Embeddings):
@@ -26,6 +30,7 @@ class VertexEmbeddings(Embeddings):
                 # Pinecone index.
                 output_dimensionality=VERTEX_EMBEDDING_DIM,
                 task_type=task_type,
+                http_options=HttpOptions(timeout=_EMBED_TIMEOUT_MS),
             ),
         )
         returned = response.embeddings

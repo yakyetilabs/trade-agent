@@ -32,11 +32,14 @@ from eval.schema import EvalCase, load_cases
 from eval.scoring import score_case
 from src.agent import run_agent
 from src.config import (
+    ANTHROPIC_API_KEY,
     CLAUDE_HAIKU_MODEL,
     CLAUDE_SONNET_MODEL,
+    PINECONE_API_KEY,
     VERTEX_EVAL_MODEL,
     VERTEX_PRIMARY_MODEL,
 )
+from src.tools.classify_import_restriction import CLASSIFIER_ERROR_PREFIX
 
 _RESULTS_DIR = Path(__file__).parent / "results"
 _MODELS: dict[str, str] = {
@@ -66,6 +69,14 @@ class RunRow:
     # keeps crashed cases out of headline-rate denominators (they still fail the case).
     assertion_results: dict[str, bool]
     failed_assertions: list[str]
+    # Classifier health, recorded per row so the report's provenance check can reject a
+    # run whose classification stage silently degraded (it happened live: an upstream
+    # 429 turned every classification into "unknown" while the rows still looked
+    # complete). ``classifier_errored`` keys on CLASSIFIER_ERROR_PREFIX; all three stay
+    # ``None`` when the run carried no classification (escalation guard, crashes).
+    classifier_intent: str | None = None
+    classifier_confidence: float | None = None
+    classifier_errored: bool | None = None
 
 
 def run_suite(
@@ -87,6 +98,7 @@ def run_suite(
         try:
             result = run_agent(case.vendor_id, case.inquiry, model_id=model_id)
             score = score_case(result, case)
+            classification = result.classification
             rows.append(
                 RunRow(
                     model=model_label,
@@ -102,6 +114,13 @@ def run_suite(
                     total_tokens=result.total_tokens,
                     assertion_results={a.name: a.passed for a in score.assertions},
                     failed_assertions=[a.name for a in score.assertions if not a.passed],
+                    classifier_intent=classification.intent.value if classification else None,
+                    classifier_confidence=classification.confidence if classification else None,
+                    classifier_errored=(
+                        classification.reasoning.startswith(CLASSIFIER_ERROR_PREFIX)
+                        if classification
+                        else None
+                    ),
                 )
             )
         except Exception as exc:  # noqa: BLE001 - a crashing case is a (recorded) failure
@@ -122,6 +141,15 @@ def run_suite(
                     failed_assertions=[f"run_error:{type(exc).__name__}"],
                 )
             )
+        row = rows[-1]
+        # Live heartbeat (flushed through the tee'd log): without it a multi-hour
+        # matrix run prints nothing until the final report - indistinguishable
+        # from a hang, which has already caused healthy runs to be killed.
+        print(
+            f"[{model_label}] {index + 1}/{len(cases)} {case.id}: "
+            f"{'pass' if row.passed else 'FAIL'} ({row.duration_ms / 1000.0:.1f}s)",
+            flush=True,
+        )
     return rows
 
 
@@ -245,6 +273,20 @@ def main() -> None:
     if args.category:
         cases = [c for c in cases if c.category.value == args.category]
     labels = [m.strip() for m in args.models.split(",") if m.strip()]
+
+    # Fail-fast preflight: every silent-degradation path observed live aborts the batch
+    # BEFORE any case runs (and spends), instead of surfacing as fallback rows.
+    if not PINECONE_API_KEY:
+        parser.error("PINECONE_API_KEY is not set - retrieval would silently degrade")
+    for label in labels:
+        if label not in _MODELS:
+            parser.error(f"unknown model label {label!r} (choose from {sorted(_MODELS)})")
+        model_id = _MODELS[label]
+        if model_id.startswith("claude-") and "@" not in model_id and not ANTHROPIC_API_KEY:
+            parser.error(
+                f"label {label!r} binds the direct Anthropic API ({model_id})"
+                " but ANTHROPIC_API_KEY is not set"
+            )
 
     all_rows: list[RunRow] = []
     for label in labels:

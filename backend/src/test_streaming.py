@@ -302,9 +302,13 @@ def test_normal_run_streams_stage_pairs_then_done(monkeypatch: pytest.MonkeyPatc
         140,
     )
 
-    # Vendor scope rides in the runtime context (never a model-facing arg); the cap + v2 applied.
+    # Vendor scope and the run's model binding ride in the runtime context (never a
+    # model-facing arg); the cap + v2 applied.
     assert fake.invoked_with is not None
-    assert fake.invoked_with["context"] == {"vendor_id": "V-001"}
+    assert fake.invoked_with["context"] == {
+        "vendor_id": "V-001",
+        "model_id": agent.VERTEX_PRIMARY_MODEL,
+    }
     assert fake.invoked_with["config"] == {"recursion_limit": agent.RECURSION_LIMIT}
     assert fake.invoked_with["version"] == "v2"
 

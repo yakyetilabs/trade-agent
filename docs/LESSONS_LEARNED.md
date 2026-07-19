@@ -25,6 +25,8 @@ This is a living document; keep appending as the deploy phase continues.
 - [A custom domain is not authorized for federated sign-in until you allowlist it](#a-custom-domain-is-not-authorized-for-federated-sign-in-until-you-allowlist-it)
 - [A model quota grant is several quotas; probe the endpoint, don't trust the console](#a-model-quota-grant-is-several-quotas-probe-the-endpoint-dont-trust-the-console)
 - [Agent loops burst through per-minute token quotas, and graceful fallbacks hide it](#agent-loops-burst-through-per-minute-token-quotas-and-graceful-fallbacks-hide-it)
+- [A system prompt tuned on one model family overfits its tool-calling habits](#a-system-prompt-tuned-on-one-model-family-overfits-its-tool-calling-habits)
+- [An eval arm must bind every internal model call, not just the main loop](#an-eval-arm-must-bind-every-internal-model-call-not-just-the-main-loop)
 - [Open questions / to verify next](#open-questions--to-verify-next)
 
 ## A Firebase project is a GCP project
@@ -200,8 +202,27 @@ This is a living document; keep appending as the deploy phase continues.
 - The damaging failure mode was not the 429 but the masking: the serving path degrades a failed model call into a graceful fallback response, which is right for end users and wrong for measurement.
   Three evaluation passes here read as "completed" while their rows were fallback text; the tell was provenance, not status - a row with zero recorded tokens and no cost never touched the model.
 - The 429 body names the exact metric and base model (here `global_generate_content_input_tokens_per_minute_per_base_model`), but neither the configured value nor the depletion state; bracket those empirically.
-  Two probes bound the admission budget in minutes: a 7-token call succeeded instantly while a single ~2.5k-token call failed through a full 129-second retry ladder against an otherwise idle project - proof the effective per-minute value sat below one ordinary request, which no client-side behavior can fix.
-- Practice: before a batch run, compute one task's burst profile (calls x input tokens per call) against the quota value; validate one task live before committing to the batch; treat zero-token "successes" as corrupt rows and discard that run's results; and when 429s persist against an idle project, stop tuning the client and go read the configured quota value.
+  Two probes bound the admission budget in minutes: a 7-token call succeeded instantly while a single ~2.5k-token call failed through a full 129-second retry ladder against an otherwise idle project - proof the effective admission budget sat below one ordinary request, which no client-side behavior can fix.
+- Correction after root-causing: the starving quota was not a platform-set per-minute value at all but a **self-set per-day override** (60k tokens/day, left over from an early cost-guard experiment), which the 429's per-minute metric name gave no hint of.
+  Newer Gemini models on Vertex admit via Dynamic Shared Quota with no per-minute token knob to raise, so the only project-side dial on that path is whatever override you set yourself - and a per-day cap does not refill by waiting a minute, which is why every pacing and backoff tactic failed.
+- Practice: before a batch run, compute one task's burst profile (calls x input tokens per call) against the quota value; validate one task live before committing to the batch; treat zero-token "successes" as corrupt rows and discard that run's results; and when 429s persist against an idle project, stop tuning the client and audit the configured quota values - **including overrides your own project set**, which sit in the same console table as platform defaults and are the first thing to rule out.
+
+## A system prompt tuned on one model family overfits its tool-calling habits
+
+- A prompt that reliably drives tool use on the model family it was developed against can carry unstated assumptions that another family does not share: when to answer in prose versus calling a tool, whether to parallelize tool calls, and whether a final tool call may be replaced by a summary of what the tool would have said.
+  Concrete hit here: an agent whose only sanctioned answer channel is a drafting tool worked flawlessly on Gemini, while Claude Haiku ended runs with well-written prose instead of the required tool call - 0/3 on the affected category, with nothing else different.
+- The fix is to promote the implicit contract to an explicit protocol block in the system prompt: name the tool that is the only valid answer channel, state that ending in prose is a failed run, and pin the one-tool-per-turn expectation.
+  That block cost nothing on the original family and took the second family to 3/3; a unit test now pins the protocol sentences so a prompt edit cannot silently drop them.
+- Practice: treat cross-model portability of an agent prompt as a tested property, not an assumption; before comparing models through a shared harness, smoke each new family and read its transcripts for protocol drift rather than only scoring outcomes.
+
+## An eval arm must bind every internal model call, not just the main loop
+
+- Agent systems often make model calls the orchestration does not surface: classifier or router calls, structured-output extractions, summarizers inside tools.
+  If a model-comparison harness swaps only the main loop's binding, those interior calls silently keep using the default model, and every arm's numbers become a blend.
+- The failure compounds quietly: here, an interior classifier call kept running the production model inside the "compare a different model" arms, so token counts, latencies, and costs attributed to the candidate model partly measured the default one - and when the default model's quota died, healthy-looking candidate rows carried degraded classifications.
+- The fix is structural, not procedural: thread the run's model binding through the same typed runtime context that carries tenancy, so any tool making an interior model call must read the bound model and cannot fall back to a global default.
+  Then record per-row health for the interior call (intent, confidence, an errored flag) and make the report generator refuse rows whose interior call degraded.
+- Practice: enumerate every model call a single task makes before trusting any per-model measurement, and prefer one seam that all of them resolve through; a comparison harness is only as honest as its least-visible model call.
 
 ## Open questions / to verify next
 

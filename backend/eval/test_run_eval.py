@@ -145,11 +145,49 @@ def test_summarize_degraded_and_unpriced_rows_render_na() -> None:
     assert "[flash] c1: run_error:ValueError" in md
 
 
+def test_run_suite_records_classifier_health(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each row carries the classification stage's intent/confidence/error marker.
+
+    The error flag keys on CLASSIFIER_ERROR_PREFIX - the contract the report's
+    provenance check uses to reject rows whose classification silently degraded.
+    """
+    cases = load_cases()[:2]
+    healthy = SimpleNamespace(
+        intent=SimpleNamespace(value="tariff_lookup"), confidence=0.91, reasoning="clear ask"
+    )
+    degraded = SimpleNamespace(
+        intent=SimpleNamespace(value="unknown"),
+        confidence=0.0,
+        reasoning=f"{run_eval.CLASSIFIER_ERROR_PREFIX} 429 RESOURCE_EXHAUSTED",
+    )
+    results = iter(
+        SimpleNamespace(
+            duration_ms=1.0,
+            prompt_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            classification=classification,
+        )
+        for classification in (healthy, degraded)
+    )
+    score = SimpleNamespace(passed=True, passed_count=1, total=1, assertions=[])
+    monkeypatch.setattr(run_eval, "run_agent", lambda *a, **k: next(results))
+    monkeypatch.setattr(run_eval, "score_case", lambda *a: score)
+
+    rows = run_suite(cases, "flash", "test-model")
+
+    assert (rows[0].classifier_intent, rows[0].classifier_errored) == ("tariff_lookup", False)
+    assert rows[0].classifier_confidence == 0.91
+    assert (rows[1].classifier_intent, rows[1].classifier_errored) == ("unknown", True)
+
+
 def test_run_suite_paces_between_cases_but_not_before_the_first(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cases = load_cases()[:3]
-    result = SimpleNamespace(duration_ms=1.0, prompt_tokens=1, output_tokens=1, total_tokens=2)
+    result = SimpleNamespace(
+        duration_ms=1.0, prompt_tokens=1, output_tokens=1, total_tokens=2, classification=None
+    )
     score = SimpleNamespace(passed=True, passed_count=1, total=1, assertions=[])
     sleeps: list[float] = []
     monkeypatch.setattr(run_eval, "run_agent", lambda *a, **k: result)
