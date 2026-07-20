@@ -79,19 +79,12 @@ export function ConsolePage() {
       {/* Scroll region: the vendor context, pipeline, advisory model reasoning/response, and the
           authoritative draft all scroll here, above the pinned input. */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto py-8">
-        <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold text-fg">Console</h1>
-            <p className="mt-1 text-sm text-fg-muted">
-              Submit an inquiry, watch the agent pipeline run, then review and release the grounded
-              draft.
-            </p>
-          </div>
-          {isTerminal ? (
-            <button type="button" className="btn btn-ghost" onClick={reset}>
-              New inquiry
-            </button>
-          ) : null}
+        <header className="mb-6">
+          <h1 className="text-xl font-semibold text-fg">Console</h1>
+          <p className="mt-1 text-sm text-fg-muted">
+            Submit an inquiry, watch the agent pipeline run, then review and release the grounded
+            draft.
+          </p>
         </header>
 
         {selectedVendor ? (
@@ -146,6 +139,8 @@ export function ConsolePage() {
           value={inquiryText}
           onChange={setInquiryText}
           inputRef={inquiryInputRef}
+          isTerminal={isTerminal}
+          onReset={reset}
           onSubmit={(inquiry) => {
             if (selectedVendorId) start(selectedVendorId, inquiry);
           }}

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 
+import { renderInlineMarkdown } from "./inlineMarkdown";
 import { StreamingCaret } from "./StreamingCaret";
 import { useTypewriter } from "./useTypewriter";
 
@@ -61,7 +62,7 @@ export function ReasoningPanel({
   }, [shown, reasoning, streaming, open]);
 
   return (
-    <section className="mt-6 rounded-xl border border-hairline bg-surface p-5">
+    <section className="mt-6">
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -91,10 +92,10 @@ export function ReasoningPanel({
         <div
           id={regionId}
           ref={scrollRef}
-          className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-hairline bg-ink/50 p-3"
+          className="mt-3 max-h-64 overflow-y-auto border-l border-hairline pl-4"
         >
           <p className="whitespace-pre-wrap text-xs leading-relaxed text-fg-muted">
-            {shown}
+            {renderInlineMarkdown(shown)}
             {streaming ? <StreamingCaret /> : null}
           </p>
         </div>

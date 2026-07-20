@@ -93,6 +93,14 @@
     scrollbar-width: thin;
     scrollbar-color: var(--color-hairline) transparent;
   }
+
+  /* Tailwind v4 Preflight drops v3's `cursor: pointer` on buttons to match the native browser
+     default; restore it for enabled buttons (the official v4 upgrade-guide snippet). Disabled
+     buttons keep their own `cursor-not-allowed` (e.g. the `.btn` base) via the `:not(:disabled)`. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
 }
 
 @layer components {

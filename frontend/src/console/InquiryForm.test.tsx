@@ -11,11 +11,15 @@ function ControlledInquiryForm({
   running = false,
   initialValue = "",
   onSubmit = vi.fn(),
+  isTerminal = false,
+  onReset = vi.fn(),
 }: {
   vendorId?: string | null;
   running?: boolean;
   initialValue?: string;
   onSubmit?: (inquiry: string) => void;
+  isTerminal?: boolean;
+  onReset?: () => void;
 }) {
   const [value, setValue] = useState(initialValue);
   return (
@@ -25,6 +29,8 @@ function ControlledInquiryForm({
       value={value}
       onChange={setValue}
       onSubmit={onSubmit}
+      isTerminal={isTerminal}
+      onReset={onReset}
     />
   );
 }
@@ -61,5 +67,18 @@ describe("InquiryForm", () => {
       "What is the status of shipment S-9999?",
     );
     expect(screen.getByRole("button", { name: "Run inquiry" })).toBeEnabled();
+  });
+
+  it("reveals the New inquiry reset only once a run has settled, and calls onReset", async () => {
+    const user = userEvent.setup();
+    const onReset = vi.fn();
+    const { rerender } = render(
+      <ControlledInquiryForm isTerminal={false} onReset={onReset} />,
+    );
+    expect(screen.queryByRole("button", { name: "New inquiry" })).not.toBeInTheDocument();
+
+    rerender(<ControlledInquiryForm isTerminal={true} onReset={onReset} />);
+    await user.click(screen.getByRole("button", { name: "New inquiry" }));
+    expect(onReset).toHaveBeenCalledTimes(1);
   });
 });

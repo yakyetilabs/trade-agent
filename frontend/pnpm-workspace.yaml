@@ -1,6 +1,7 @@
-# pnpm 11 records native-build-script approvals here. We depend on Firebase Auth only, so the
-# Firestore/gRPC postinstall hooks are intentionally NOT run (false). Making the decision explicit
-# stops pnpm from treating them as pending approvals on every install and `pnpm run`.
+# pnpm 11 records native-build-script approvals here. Both entries below are leftovers from the
+# removed Firebase Auth dependency and no longer resolve to anything in the lockfile; they are kept
+# only because this file also marks the pnpm workspace root. Making the decision explicit stops
+# pnpm from treating them as pending approvals on every install and `pnpm run`.
 allowBuilds:
   "@firebase/util": false
   protobufjs: false

@@ -8,6 +8,10 @@ Built with **Vertex AI (Gemini)**, **Python + FastAPI**, **LangGraph**, **Pineco
 
 **Live demo:** [tradeops-ai.samir.codes](https://tradeops-ai.samir.codes) - pick a vendor and run an inquiry.
 
+![TradeOps AI resolving a flagged manifest: a vendor-scoped inquiry runs through the agent pipeline, the model's reasoning streams live, and the grounded draft is approved and written to the audit trail.](docs/assets/demo.gif)
+
+<sub>Vendor-scoped inquiry, live agent reasoning, a grounded draft citing the governing HTS clauses, human approval, then the audit trail. The run's actual latency and token counts are shown in frame. All data synthetic.</sub>
+
 The interesting part is not that an LLM writes text.
 It is the control system around the LLM: scope the model cannot escape, deterministic guards that fire before it runs, a human gate it cannot bypass, an audit trail for every step it takes, and a bounded cost and abuse surface under public, unauthenticated traffic.
 

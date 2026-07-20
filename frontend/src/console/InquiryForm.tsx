@@ -13,6 +13,10 @@ interface InquiryFormProps {
   onSubmit: (inquiry: string) => void;
   /** Lets the page focus the textarea after a prompt chip pre-fills it. */
   inputRef?: Ref<HTMLTextAreaElement>;
+  /** A run has settled (done/guarded/error): reveal the "New inquiry" reset in the footer. */
+  isTerminal?: boolean;
+  /** Clears the settled run so the analyst can start over (the relocated "New inquiry" action). */
+  onReset?: () => void;
 }
 
 /**
@@ -21,6 +25,10 @@ interface InquiryFormProps {
  * empty or over the limit; the counter turns red past the cap so an over-long paste is visible rather
  * than silently truncated. The text is controlled (`value`/`onChange`) so the idle example prompts
  * can pre-fill the composer from outside.
+ *
+ * Chat-composer layout: a single bordered field holds the textarea plus an inner action row, so the
+ * primary "Run inquiry" button lives inside the input rather than under it. Once a run settles, the
+ * secondary "New inquiry" reset appears in the footer beneath the field.
  */
 export function InquiryForm({
   vendorId,
@@ -29,6 +37,8 @@ export function InquiryForm({
   onChange,
   onSubmit,
   inputRef,
+  isTerminal = false,
+  onReset,
 }: InquiryFormProps) {
   const trimmedLength = value.trim().length;
   const overLimit = value.length > MAX_INQUIRY_LENGTH;
@@ -48,7 +58,6 @@ export function InquiryForm({
 
   return (
     <form
-      className="rounded-xl border border-hairline bg-surface p-5"
       onSubmit={(event) => {
         event.preventDefault();
         submit();
@@ -62,17 +71,33 @@ export function InquiryForm({
         selected vendor.
       </p>
 
-      <textarea
-        id="inquiry"
-        ref={inputRef}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onKeyDown={handleKeyDown}
-        disabled={running}
-        rows={4}
-        placeholder="e.g. Why is shipment S-1003 held, and what is required to clear HTS 8542.31.0001?"
-        className="mt-3 w-full resize-y rounded-lg border border-hairline bg-elevated px-3 py-2.5 text-sm text-fg placeholder:text-fg-subtle focus-visible:border-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-60"
-      />
+      {/* One bordered field wraps the textarea and its action row (chat-composer style): the
+          Run inquiry button sits inside the input, not beneath it. focus-within lights the whole
+          field since the textarea itself is borderless. */}
+      <div className="mt-3 rounded-xl border border-hairline bg-elevated transition-colors focus-within:border-accent/60 focus-within:ring-2 focus-within:ring-accent/40">
+        <textarea
+          id="inquiry"
+          ref={inputRef}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={running}
+          rows={4}
+          placeholder="e.g. Why is shipment S-1003 held, and what is required to clear HTS 8542.31.0001?"
+          className="block w-full resize-none bg-transparent px-3.5 pt-3 pb-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <div className="flex items-center justify-between gap-3 px-3.5 pb-3">
+          <span
+            className={`font-mono text-xs ${overLimit ? "text-danger" : "text-fg-subtle"}`}
+            aria-live="polite"
+          >
+            {value.length.toLocaleString("en-US")} / {MAX_INQUIRY_LENGTH.toLocaleString("en-US")}
+          </span>
+          <button type="submit" className="btn btn-primary" disabled={!canSubmit}>
+            {running ? "Running…" : "Run inquiry"}
+          </button>
+        </div>
+      </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         <span className="text-xs text-fg-subtle" aria-live="polite">
@@ -84,17 +109,11 @@ export function InquiryForm({
             "Select a vendor to run an inquiry."
           )}
         </span>
-        <div className="ml-auto flex items-center gap-3">
-          <span
-            className={`font-mono text-xs ${overLimit ? "text-danger" : "text-fg-subtle"}`}
-            aria-live="polite"
-          >
-            {value.length.toLocaleString("en-US")} / {MAX_INQUIRY_LENGTH.toLocaleString("en-US")}
-          </span>
-          <button type="submit" className="btn btn-primary" disabled={!canSubmit}>
-            {running ? "Running…" : "Run inquiry"}
+        {isTerminal && onReset ? (
+          <button type="button" className="btn btn-ghost ml-auto" onClick={onReset}>
+            New inquiry
           </button>
-        </div>
+        ) : null}
       </div>
     </form>
   );
