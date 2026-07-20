@@ -63,7 +63,7 @@ A single inquiry runs through a fixed, auditable sequence.
 The model only runs in the middle of that sequence, and only after the deterministic guards have cleared the case.
 
 **1. Scope.**
-There is no sign-in - the app is a public demo over synthetic data (the original allowlist perimeter was removed in the public-demo pivot; spend is capped by infra ceilings plus an in-app per-IP rate limiter, see `DESIGN_DECISIONS.md` §11).
+There is no sign-in - the app is a public demo over synthetic data, its request surface bounded by infrastructure ceilings and an in-app per-IP rate limiter rather than by a login (see `DESIGN_DECISIONS.md` §11).
 The analyst selects an active vendor from the picker, and that `vendor_id` is pattern-validated server-side and bound into the run, never trusted as free text.
 
 **2. Open a case.**
@@ -71,7 +71,7 @@ The analyst submits a natural-language inquiry, for example "Why is my latest ca
 
 **3. Pre-screen (deterministic, before the model).**
 An escalation guard scans for severe signals (contraband, sanctions, federal seizure, bribery) and routes those straight to a human queue; the model never runs on them.
-A cross-vendor guard refuses any inquiry that references another vendor's shipment or vendor ids, enforcing data segregation before a single token is spent.
+A cross-vendor guard refuses any inquiry that references another vendor's shipment or vendor ids, enforcing data segregation before the model is ever invoked.
 
 **4. Prepare the draft (the agent loop).**
 A bounded LangGraph agent runs four tools in order: classify the inquiry, look up the vendor's shipments and manifests, retrieve the governing HTS clauses, and draft the response.

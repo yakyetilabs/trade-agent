@@ -1,18 +1,18 @@
 # GCP & Pinecone Setup - Manual Runbook
 
-This is the step-by-step manual setup for the `trade-agent` stack. Per the project's IaC posture - a
-deliberate design decision to ship with **no managed IaC** for the initial build - there is **no
-Terraform**: console setup plus single-line CLI deploy scripts only.
+This is the step-by-step manual setup for the `trade-agent` stack. Provisioning is deliberately by
+console plus single-line CLI deploy scripts, not managed IaC, so there is **no Terraform**. At this
+surface - one Cloud Run service, one Firestore database, one Pinecone index - Terraform would add
+ceremony without payoff; it is the obvious first addition once the surface grows enough to warrant it.
 
-Everything lives in **one** project - `trade-agent-ff12a`. A Firebase project *is* a GCP project,
+Everything lives in **one** project - `trade-agent-ff12a`. A Firebase project _is_ a GCP project,
 so Firestore, Cloud Run, and Firebase Hosting all share one identity, billing account, and quota.
-(The public-demo pivot removed the Firebase Auth layer entirely; see §3 and `DESIGN_DECISIONS.md` §11.)
 
-> 💡 **Cost posture.** There is no always-on infrastructure: Cloud Run scales to zero, and Firestore,
-> Hosting, and Pinecone Starter stay within their standing service tiers. Vertex AI inference and
-> embeddings are the only usage-metered spend, and it is bounded on every axis - the Cloud Run instance
-> ceiling, the in-app per-IP rate limiter, and the per-request caps (§9) - so a public, unauthenticated
-> endpoint cannot be driven into an open-ended bill.
+> 💡 **Bounding a public endpoint.** The API is public and unauthenticated, so its resource envelope is
+> capped by design rather than by a login: Cloud Run scales to zero under a hard instance ceiling, an
+> in-app per-IP rate limiter throttles hostile traffic, and per-request input caps bound each call (§9).
+> Vertex AI inference is the only usage-metered dependency, and those same controls bound it - so abuse
+> cannot translate into unbounded resource consumption. Full rationale in `DESIGN_DECISIONS.md` §11.
 
 ---
 
@@ -41,13 +41,12 @@ Conventions used below:
 
 ## 1. Create the project & link billing
 
-> ✅ **Already done via Firebase.** This project was created by adding Firebase (Step 3) with display
-> name `trade-agent`; Firebase provisioned the underlying GCP project with ID `trade-agent-ff12a`. The
-> steps below are the equivalent console steps - you do **not** need to re-create the project.
+> 💡 **Two ways in - pick one.** If you start by adding Firebase (Step 3), it provisions the underlying
+> GCP project for you and you can skip this step. The commands below are the standalone equivalent for
+> creating the project directly. Don't do both.
 
 **Console:** https://console.cloud.google.com → project picker → **New Project** → display name `trade-agent`
-(the resulting ID is `trade-agent-ff12a`). Then **Billing** → link your billing account
-(scale-to-zero means the service accrues no charge while idle).
+(the resulting ID is `trade-agent-ff12a`). Then **Billing** → link your billing account.
 
 **CLI equivalent:**
 
@@ -71,8 +70,6 @@ gcloud services enable \
   firestore.googleapis.com \
   artifactregistry.googleapis.com \
   cloudbuild.googleapis.com \
-  iamcredentials.googleapis.com \
-  identitytoolkit.googleapis.com \
   secretmanager.googleapis.com \
   --project=trade-agent-ff12a
 ```
@@ -82,25 +79,23 @@ gcloud services enable \
 - `firestore` - state + audit store
 - `artifactregistry` - container image storage (Container Registry / `gcr.io` is retired; use Artifact Registry)
 - `cloudbuild` - image build during `gcloud run deploy --source`
-- `identitytoolkit` - Firebase Authentication backend
 - `secretmanager` - the Pinecone API key at runtime, mounted into Cloud Run via `--set-secrets` (see §9)
+
+This is a public, no-auth demo, so no Identity Platform / Firebase Auth API is needed (see §3).
 
 ---
 
 ## 3. Add Firebase to the project
 
 **Console:** https://console.firebase.google.com → **Add project** → select the existing `trade-agent-ff12a`
-GCP project (do **not** create a new one). The project runs on the Blaze plan (required for Vertex AI +
-Cloud Run); Blaze is pay-as-you-go, so scale-to-zero and usage-metered inference are what keep spend bounded, not the plan tier.
+GCP project (do **not** create a new one). The project must be on the **Blaze** (pay-as-you-go) plan,
+which both Vertex AI and Cloud Run require.
 
 Firebase is used for **Hosting only**.
 
-> **Firebase Authentication is no longer used.** The original build gated the app behind Google
-> sign-in plus a backend email allowlist; the public-demo pivot removed that layer entirely (see
-> `DESIGN_DECISIONS.md` §11 - spend is now capped by the Cloud Run instance ceiling, a Vertex quota,
-> a billing budget, and the in-app per-IP rate limiter). No Auth provider needs to be enabled, and
-> the frontend needs no registered Web App or `firebaseConfig` values. If Authentication is still
-> enabled from the pre-pivot setup, it is harmless but can be disabled in the Firebase console.
+> **Hosting only - no Authentication.** This is a public, no-auth demo, so you do not enable any Auth
+> provider, and the frontend needs no registered Web App or `firebaseConfig` values. The public
+> endpoint is bounded app-side instead of behind a login; the reasoning is in `DESIGN_DECISIONS.md` §11.
 
 ---
 
@@ -134,9 +129,10 @@ service cloud.firestore {
 
 ---
 
-## 5. Service account (backend runtime + local dev)
+## 5. Service accounts (backend runtime, local dev, build)
 
 The backend uses one service account to read/write Firestore and call Vertex AI.
+A **second, separate** identity builds the container; it is covered in 5b and is easy to miss because GCP creates it for you.
 
 **Console:** IAM & Admin → **Service Accounts → Create** → name `trade-agent-platform-access`.
 
@@ -164,11 +160,9 @@ gcloud projects add-iam-policy-binding trade-agent-ff12a \
   --member="serviceAccount:${SA}" --role="roles/logging.viewer"
 ```
 
-> A pre-pivot deployment also granted `roles/firebaseauth.admin` for Admin SDK token verification.
-> The public-demo pivot removed the auth layer, so that grant is no longer needed and can be revoked.
-
-> The `logging.viewer` grant is the deliberately-not-least-privilege bit called out in
-> `DESIGN_DECISIONS.md` §8 - minor logging read for rapid operator debugging.
+> `logging.viewer` is included so an operator can read the structured agent traces in Cloud Logging
+> while debugging; the runtime itself only writes logs. It is the one grant beyond the runtime's strict
+> needs (`DESIGN_DECISIONS.md` §8).
 
 ### 5a. Local development credentials
 
@@ -186,22 +180,42 @@ dev**, the backend authenticates via Application Default Credentials (`gcp/clien
 > ⚠️ The key file (Method B) is already blocked by `.gitignore` (`*key*.json`, `*credentials*.json`).
 > Never commit it. Method A avoids the key entirely and is the safer default.
 
+### 5b. Build service account (narrow the auto-granted Editor)
+
+`gcloud run deploy --source` runs the container build on Cloud Build as the **Compute Engine default service account** (`PROJECT_NUMBER-compute@developer.gserviceaccount.com`), not the runtime SA from Step 5.
+GCP creates that account with `roles/editor` attached, so out of the box the build identity holds near-full control of the project.
+Replace it with `roles/run.builder`, the role Google scopes to source deploys - read the source object, read/write Artifact Registry, write logs, and nothing else:
+
+```bash
+COMPUTE_SA="486070629701-compute@developer.gserviceaccount.com"  # PROJECT_NUMBER-compute@...
+
+# Grant the narrow role first so no window exists with neither, then remove Editor.
+gcloud projects add-iam-policy-binding trade-agent-ff12a --project=trade-agent-ff12a \
+  --member="serviceAccount:${COMPUTE_SA}" --role="roles/run.builder"
+
+# roles/run.builder takes a couple of minutes to propagate; wait before the first deploy.
+gcloud projects remove-iam-policy-binding trade-agent-ff12a --project=trade-agent-ff12a \
+  --member="serviceAccount:${COMPUTE_SA}" --role="roles/editor"
+```
+
+Before removing Editor, confirm this account is not also serving as a runtime identity elsewhere - it is the default for Compute Engine, Cloud Functions, and any Cloud Run service deployed without an explicit `--service-account`.
+Then prove the narrowed role with one real `backend/deploy.sh`: build-time and runtime identities are separate accounts, so a failed build cannot affect the running service, and Editor is one line to restore.
+
+> To confirm which identity actually runs your builds: `gcloud builds list --region=us-central1 --format="table(id,status,serviceAccount)"`, then `gcloud builds describe <ID> --region=us-central1` for its source, steps, and image target. Pass `--region` - a region-less `gcloud builds list` returns nothing for Cloud Run source deploys.
+
+The rationale for splitting the build and runtime identities is in [`DESIGN_DECISIONS.md`](https://github.com/yakyetilabs/trade-agent/blob/main/docs/DESIGN_DECISIONS.md) §12.
+
 ---
 
 ## 6. Artifact Registry (container images)
 
-**CLI:**
+No manual step here. On the first `gcloud run deploy --source` (Step 9), Cloud Build creates the Artifact
+Registry repository `cloud-run-source-deploy` in the service's region and pushes the image to it:
 
-```bash
-gcloud artifacts repositories create trade-agent-images \
-  --repository-format=docker \
-  --location=us-central1 \
-  --description="trade-agent backend container images" \
-  --project=trade-agent-ff12a
-```
+`us-central1-docker.pkg.dev/trade-agent-ff12a/cloud-run-source-deploy/trade-agent-backend`
 
-The backend image will be pushed to
-`us-central1-docker.pkg.dev/trade-agent-ff12a/trade-agent-images/trade-agent-backend`.
+The only prerequisite is the `artifactregistry` API from Step 2. A hand-named repository is unnecessary for
+the source-deploy flow, so there is nothing to provision in advance.
 
 ---
 
@@ -213,12 +227,9 @@ Done in the Pinecone console (https://app.pinecone.io) - independent of GCP.
 - **Dimension:** **768** (must match `gemini-embedding-001` called with `output_dimensionality=768`; the
   dimension is fixed at creation and cannot be changed later)
 - **Metric:** `cosine`
-- **Type/Cloud/Region:** Serverless, **AWS `us-east-1`** (the only region the free Starter plan supports)
+- **Type/Cloud/Region:** Serverless, **AWS `us-east-1`**
 
 Copy your **API key** (Pinecone console → API Keys) into `backend/.env` (Step 8).
-
-> ⚠️ Free Starter indexes **auto-pause after ~3 weeks of inactivity**. If the demo has been idle a long
-> time, the first query may need a reactivation / re-ingest (`uv run python -m scripts.ingest_kb`).
 
 ---
 
@@ -261,7 +272,7 @@ usually right: dev uses the same-origin `/api` (Vite proxy), production bakes th
 
 ---
 
-## 9. Deploy targets (reference - scripts come in later phases)
+## 9. Deploy targets (reference)
 
 ### Backend → Cloud Run
 
@@ -282,11 +293,11 @@ gcloud run deploy trade-agent-backend \
   --project=trade-agent-ff12a
 ```
 
-- `--allow-unauthenticated` is correct here: the API is a public synthetic-data demo, and spend is
-  capped app-side (instance ceiling + Vertex quota + in-app per-IP rate limiter; `DESIGN_DECISIONS.md`
-  §11), not by IAM. This is why I deliberately do **not** add IAP / a Load Balancer (a fixed-cost
-  component this architecture rules out).
-- `--min-instances=0` keeps the idle footprint at zero (no always-on instance). Trade-off: a ~5-15s cold start on the first request.
+- `--allow-unauthenticated` is correct here: the API is a public synthetic-data demo bounded app-side
+  (instance ceiling + Vertex quota + in-app per-IP rate limiter; `DESIGN_DECISIONS.md` §11), not by IAM.
+  IAP or a Load Balancer would add fixed hourly cost and reintroduce CORS preflight failures, so the
+  design omits both (`DESIGN_DECISIONS.md` §9, §11).
+- `--min-instances=0` means no always-on instance (scale-to-zero). Trade-off: a ~5-15s cold start on the first request after idle.
 
 ### Frontend → Firebase Hosting
 
@@ -327,7 +338,7 @@ See `DESIGN_DECISIONS.md` §9 "The split-origin pivot".
 ## 10. Post-setup verification
 
 - [ ] `gcloud config get-value project` → `trade-agent-ff12a`
-- [ ] All 7 APIs from Step 2 show **Enabled** in the console
+- [ ] All 6 APIs from Step 2 show **Enabled** in the console
 - [ ] Firestore database exists in `us-central1` with the three `trade-agent-*` collections
 - [ ] The service account has the 4 roles from Step 5
 - [ ] Local credentials ready: `gcloud auth application-default login` done (Method A), **or** `backend/trade-agent-sa-key.json` exists and is **not** tracked by git (Method B; `git status` clean)

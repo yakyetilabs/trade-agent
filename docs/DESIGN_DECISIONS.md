@@ -239,7 +239,7 @@ To ensure the boundary between what is built and what is claimed remains complet
 - **Affiliated with any actual port authority or carrier.** The architecture mirrors the exact shape of a US import customs-clearance workflow, but no real-world agencies or personnel are attached.
 - **Built with bloated third-party AgentOps platforms.** No Langfuse or external observability proxies. Cloud Run streaming logs, a dedicated Firestore trace collection, and a custom `/traces` analytics page in the web interface comprise the entire lightweight operational surface.
 - **Equipped with a deterministic post-processing policy engine.** The system relies on rigid system-prompt enforcement for text assertions, which is the exact model-trusted constraint a production pipeline would fortify with an independent rules parser.
-- **Equipped with full least-privilege IAM policies.** The `trade-agent-platform-access` service role includes minor logging read privileges for rapid operator debugging that the serverless engine itself does not consume during runtime transactions.
+- **Equipped with full least-privilege IAM policies.** The `trade-agent-platform-access` runtime role includes minor logging read privileges for rapid operator debugging that the serverless engine itself does not consume during runtime transactions (§12 documents the full IAM posture).
 
 ---
 
@@ -270,3 +270,29 @@ Putting the `api.` subdomain behind Cloudflare's rate limiter would re-break the
 **Scope of the change.** `GET /api/vendors` and `GET /api/traces` return unfiltered synthetic data (the traces page is the public observability showcase), and the disposition endpoint stays public and functional - the human approve/reject action is a differentiator worth demonstrating.
 The synthetic-data banner remains load-bearing.
 References to the allowlist elsewhere in this document (§5, §9) are retained as dated history with amendment notes.
+
+---
+
+## 12. IAM Posture: Two Identities, Not One
+
+**The decision.** This project runs under two distinct service accounts, each holding only what it uses: `trade-agent-platform-access` at runtime, and the build identity that produces the container image.
+Neither holds a broad primitive role, and the project carries no `roles/editor` binding on any identity.
+
+**Why two.** The distinction is easy to miss, because only one of the two is chosen deliberately.
+`gcloud run deploy --source` hands the build to Cloud Build, which executes it as the **Compute Engine default service account**, an account GCP creates automatically with `roles/editor` already attached.
+Left at that default, "build my container" is authorized to read every Firestore document, alter most resources, and change service configuration, even though the running service uses an entirely different and tightly scoped identity.
+
+**Why it matters.** A build identity is a supply-chain surface, not a deployment detail.
+Anything that can influence a build (a compromised base image, a dependency's install hook, an injected build step) executes with whatever that account holds.
+A clean runtime role does not offset this, because the build never touches the runtime role.
+
+**What each identity holds.**
+
+- **Runtime (`trade-agent-platform-access`):** Vertex AI user, Firestore user, log writer, log viewer, plus Secret Manager accessor scoped to the single Pinecone secret rather than granted project-wide.
+- **Build (Compute Engine default SA):** `roles/run.builder` only, the role Google publishes for deploy-from-source. It is six permissions: read the source object, upload / download / delete Artifact Registry artifacts, and write log entries.
+
+**The non-obvious part.** The build identity needs no Cloud Run permission at all.
+In this flow the build only builds; the CLI performs the actual deploy under the operator's own credentials, so neither `run.admin` nor `serviceAccountUser` belongs on the build account.
+Deriving that from the build definition rather than assuming it is what keeps the role at six permissions instead of the ~80 in the general-purpose Cloud Build role.
+
+The operational steps, including how to verify which identity your builds actually use, are in [`docs/GCP_SETUP.md`](https://github.com/yakyetilabs/trade-agent/blob/main/docs/GCP_SETUP.md) §5b.

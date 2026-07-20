@@ -1,9 +1,8 @@
 # GCP & Cloud Deployment: Lessons Learned
 
-A running record of non-obvious, hard-won lessons from deploying this project to GCP.
-Written to be portable: useful in a future enterprise GCP engagement or an interview, not just this repo.
+A record of non-obvious, hard-won lessons from deploying this project to GCP.
+Written to be portable: useful in a future enterprise GCP engagement, not just this repo.
 Each entry states the general principle first, with a concrete aside from this project where useful.
-This is a living document; keep appending as the deploy phase continues.
 
 ## Contents
 
@@ -12,6 +11,7 @@ This is a living document; keep appending as the deploy phase continues.
 - [Same-origin beats CORS, and beats a load balancer](#same-origin-beats-cors-and-beats-a-load-balancer)
 - [Authentication and authorization are different layers](#authentication-and-authorization-are-different-layers)
 - [Service accounts must be created and granted explicitly](#service-accounts-must-be-created-and-granted-explicitly)
+- [Your build runs as an identity you never chose, and it ships with Editor](#your-build-runs-as-an-identity-you-never-chose-and-it-ships-with-editor)
 - [Secrets belong in Secret Manager](#secrets-belong-in-secret-manager)
 - [Two ignore files, two different jobs](#two-ignore-files-two-different-jobs)
 - [gcloud's list-flag delimiter can silently corrupt values](#gclouds-list-flag-delimiter-can-silently-corrupt-values)
@@ -23,11 +23,11 @@ This is a living document; keep appending as the deploy phase continues.
 - [The actual dials for cost vs. availability on a scale-to-zero service](#the-actual-dials-for-cost-vs-availability-on-a-scale-to-zero-service)
 - [Model-API feature constraints compose; verify the combination, not each feature alone](#model-api-feature-constraints-compose-verify-the-combination-not-each-feature-alone)
 - [A custom domain is not authorized for federated sign-in until you allowlist it](#a-custom-domain-is-not-authorized-for-federated-sign-in-until-you-allowlist-it)
+- [Referencing a bundler's whole env object embeds every env var in the shipped bundle](#referencing-a-bundlers-whole-env-object-embeds-every-env-var-in-the-shipped-bundle)
 - [A model quota grant is several quotas; probe the endpoint, don't trust the console](#a-model-quota-grant-is-several-quotas-probe-the-endpoint-dont-trust-the-console)
 - [Agent loops burst through per-minute token quotas, and graceful fallbacks hide it](#agent-loops-burst-through-per-minute-token-quotas-and-graceful-fallbacks-hide-it)
 - [A system prompt tuned on one model family overfits its tool-calling habits](#a-system-prompt-tuned-on-one-model-family-overfits-its-tool-calling-habits)
 - [An eval arm must bind every internal model call, not just the main loop](#an-eval-arm-must-bind-every-internal-model-call-not-just-the-main-loop)
-- [Open questions / to verify next](#open-questions--to-verify-next)
 
 ## A Firebase project is a GCP project
 
@@ -75,7 +75,26 @@ This is a living document; keep appending as the deploy phase continues.
 - Local-dev identity and the production runtime identity are two different credential paths.
   Application Default Credentials from `gcloud auth application-default login` authorize your own machine; they say nothing about whether the service account a deployed service will run as has even been created yet.
 - Grant roles at the narrowest scope that works, enumerated one at a time, rather than reaching for Editor or Owner.
-  Write down the list (this project: Vertex AI user, Firestore user, log writer, log viewer, Firebase Auth admin, Secret Manager secret accessor on one specific secret) so the grant set is reviewable.
+  Write down the list (this project: Vertex AI user, Firestore user, log writer, log viewer, Secret Manager secret accessor on one specific secret) so the grant set is reviewable.
+- Revisit the written list when a feature is removed, or it quietly becomes fiction.
+  This project carried a Firebase Auth admin grant for months after the auth layer it existed for was deleted.
+
+## Your build runs as an identity you never chose, and it ships with Editor
+
+- Auditing the identities you created is the easy half; the dangerous grants sit on the accounts the platform created for you, because nobody ever decided to make them.
+  On GCP, `gcloud run deploy --source` runs the build as the Compute Engine default service account, which is auto-created with `roles/editor` - so on an untouched project, "build my container" can read every database document and reconfigure most resources.
+- A build identity is a supply-chain surface, not a deployment detail.
+  Anything that can influence a build (a compromised base image, a dependency's install hook, an injected step) executes with whatever that account holds, no matter how small the project.
+- Prefer the vendor's purpose-built role over a permission set you hand-derive.
+  Google publishes `roles/run.builder` for exactly this path: six permissions (read the source object, upload/download/delete Artifact Registry artifacts, write log entries), and a curated role tracks the platform's own changes better than a list you maintain.
+- Derive the requirement from the build itself, not from memory.
+  `gcloud builds describe <ID>` shows the source bucket, steps, push target, and logging mode; those four facts are the permission list.
+  Pass `--region` - `gcloud builds list` queries global by default and returns nothing for Cloud Run source deploys, which build in the service's region, so an empty list is not evidence that nothing is building.
+- The build needs no deploy permission at all, which is easy to over-grant.
+  In deploy-from-source the build only builds; the CLI performs the deploy under your own credentials, so neither `run.admin` nor `serviceAccountUser` belongs on the build identity.
+- Tighten it safely: grant the narrow role first (respecting the propagation delay Google documents), then revoke the broad one, then prove it with a real deploy.
+  Build-time and runtime identities are separate accounts, so this cannot disturb the running revision, and it reverses in one line - but an IAM change that has not survived a deploy is untested, not finished.
+  Confirm first that the default SA is not also a runtime identity for Compute Engine, Cloud Functions, or a Cloud Run service deployed without an explicit `--service-account`.
 
 ## Secrets belong in Secret Manager
 
@@ -223,9 +242,3 @@ This is a living document; keep appending as the deploy phase continues.
 - The fix is structural, not procedural: thread the run's model binding through the same typed runtime context that carries tenancy, so any tool making an interior model call must read the bound model and cannot fall back to a global default.
   Then record per-row health for the interior call (intent, confidence, an errored flag) and make the report generator refuse rows whose interior call degraded.
 - Practice: enumerate every model call a single task makes before trusting any per-model measurement, and prefer one seam that all of them resolve through; a comparison harness is only as honest as its least-visible model call.
-
-## Open questions / to verify next
-
-- Whether a Server-Sent Events stream survives a CDN-fronted Hosting layer fully unbuffered, end to end.
-  The response headers are set correctly (`Cache-Control: no-store`, an unbuffering header for the origin), but this needs a live confirmation, not just a header check.
-- Whether a third-party DNS proxy (Cloudflare's orange-cloud proxying) interferes with a managed TLS certificate provisioning flow (Firebase's custom-domain cert issuance), and whether that requires temporarily disabling the proxy during provisioning.
