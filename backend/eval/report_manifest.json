@@ -2,23 +2,23 @@
   "selections": [
     {
       "label": "flash",
-      "stamps": ["20260718T233221Z", "20260719T024521Z", "20260719T034747Z"],
-      "note": "The production serving model. Three full four-model matrix passes (2026-07-18/19); the classifier binds the same model as the agent loop, so every row is end-to-end flash. Each pass verified row-by-row (token provenance, classifier health, failure attribution) by an independent sweep before selection."
+      "stamps": ["20260721T035109Z", "20260721T053005Z", "20260721T070840Z"],
+      "note": "The production serving model. Three full four-model matrix passes (2026-07-21) over the 21-case suite; the classifier binds the same model as the agent loop, so every row is end-to-end flash. Each pass verified row-by-row (token provenance, classifier health, failure attribution) by an independent sweep before selection."
     },
     {
       "label": "pro",
-      "stamps": ["20260718T233221Z", "20260719T024521Z", "20260719T034747Z"],
-      "note": "Same three matrix passes, same verification sweep. Earlier pro-only stamps (2026-07-18 morning) were discarded whole: their classifier stage had silently bound a quota-exhausted flash, violating the end-to-end rule this manifest exists to enforce."
+      "stamps": ["20260721T035109Z", "20260721T053005Z", "20260721T070840Z"],
+      "note": "Same three 2026-07-21 matrix passes, same verification sweep. Earlier pro-only stamps (2026-07-18 morning) were discarded whole: their classifier stage had silently bound a quota-exhausted flash, violating the end-to-end rule this manifest exists to enforce."
     },
     {
       "label": "haiku",
-      "stamps": ["20260718T233221Z", "20260719T024521Z", "20260719T034747Z"],
-      "note": "Served via the direct Anthropic API (first-party dashed model id; the id shape records the platform). Same three matrix passes and verification sweep as the Gemini arms."
+      "stamps": ["20260721T035109Z", "20260721T053005Z", "20260721T070840Z"],
+      "note": "Served via the direct Anthropic API (first-party dashed model id; the id shape records the platform). Same three 2026-07-21 matrix passes and verification sweep as the Gemini arms."
     },
     {
       "label": "sonnet",
-      "stamps": ["20260718T233221Z", "20260719T024521Z", "20260719T034747Z"],
-      "note": "Served via the direct Anthropic API, same three matrix passes and verification sweep. Also ran the pre-matrix one-case sanity gate that each matrix launch starts with; those gate stamps are deliberately not selected."
+      "stamps": ["20260721T035109Z", "20260721T053005Z", "20260721T070840Z"],
+      "note": "Served via the direct Anthropic API, same three 2026-07-21 matrix passes and verification sweep. Also ran the pre-matrix sanity gate that each matrix launch starts with (two semantic cases this run); those gate stamps are deliberately not selected."
     }
   ]
 }

@@ -24,8 +24,8 @@ _CASES_PATH = Path(__file__).parent / "cases.json"
 class EvalCategory(StrEnum):
     """The curated categories (mirrors DESIGN_DECISIONS.md §6) - one per load-bearing
     system property: the grounded pipeline, the two retrieval modes (deterministic
-    exact fetch and semantic discovery), unsupported-response detection, and the two
-    deterministic pre-model guards."""
+    exact fetch and semantic discovery), unsupported-response detection, the two
+    deterministic pre-model guards, and adversarial prompt-injection resistance."""
 
     HAPPY_PATH = "happy_path"
     EXACT_HTS_FETCH = "exact_hts_fetch"
@@ -33,6 +33,7 @@ class EvalCategory(StrEnum):
     UNSUPPORTED_RESPONSE = "unsupported_response"
     ESCALATION_TRIGGERS = "escalation_triggers"
     SCOPE_VIOLATIONS = "scope_violations"
+    PROMPT_INJECTION = "prompt_injection"
 
 
 class Expect(BaseModel):

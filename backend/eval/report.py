@@ -431,9 +431,10 @@ def build_report(
         "  Latency figures are therefore comparative across arms under identical local"
         " conditions - they include retrieval, Firestore, and model round-trips - and are"
         " not serving-path SLOs.",
-        "- The suite is 14 hand-curated, grounded cases across 6 capability categories;"
-        " repeat passes at temperature 0 measure stability, not sampled variance, and no"
-        " statistical significance is claimed.",
+        f"- The suite is {len(cases)} hand-curated, grounded cases across"
+        f" {len(categories)} capability categories; repeat passes at temperature 0"
+        " measure stability, not sampled variance, and no statistical significance is"
+        " claimed.",
         "- The scorer asserts mechanically checkable properties (disposition, tool"
         " sequence, citation grounding, key phrasing); overall draft prose quality is not"
         " graded by humans or by a judge model.",

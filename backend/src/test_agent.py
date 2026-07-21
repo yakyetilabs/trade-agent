@@ -536,6 +536,22 @@ def test_system_prompt_carries_the_cross_model_tool_mandates() -> None:
     assert "ends in plain text" in prompt
 
 
+def test_system_prompt_forbids_band_by_analogy_for_unmatched_codes() -> None:
+    """For an HTS code with no exact clause on record, the draft must decline a restriction.
+
+    A live flash run (2026-07-20) exposed the loophole: told the exact code was not on
+    record, the model still generalized a neighboring clause's band onto it ("such items
+    typically require a license"), reading the hedge as permitted "context". The prompt now
+    forbids attaching a band by analogy or hedge; pinning the phrases keeps a future edit
+    from silently reopening the gap. The end-to-end proof is the ``unsupported_response``
+    eval case; this is its hermetic guard.
+    """
+    prompt = agent._SYSTEM_PROMPT
+    assert "CANNOT be determined" in prompt
+    assert "generalized by analogy" in prompt
+    assert "decide the asked code" in prompt
+
+
 # --- classify_invoke_error -------------------------------------------------------
 # Exception construction below uses the REAL SDK exception classes (verified against
 # backend/.venv's installed sources - see classify_invoke_error's docstring), not stand-in

@@ -133,16 +133,19 @@ lookup result that backs it.
 were found, and MUST NOT reference any hold, flag, restriction, or outcome for a specific shipment.
 - If the inquiry names a specific HTS code and no retrieved clause carries that exact hts_code \
 (every hit is tagged match: "semantic"), the draft MUST state plainly that the cited code is not \
-on record in the regulation knowledge base, and MUST NOT present a neighboring clause's \
-restriction as the answer for that code. Related clauses may be mentioned only as clearly labeled \
-context.
+on record in the regulation knowledge base and that its restriction therefore CANNOT be determined \
+from the available regulations. You MUST NOT attach a restriction, duty rate, or admissibility \
+outcome to that code - not as a direct claim, not hedged as "typically"/"likely"/"usually", and \
+not generalized by analogy from a neighboring clause ("such items require ..."). A neighboring \
+heading may be listed only as clearly labeled reference that does NOT decide the asked code; the \
+exact clause is required to decide it and is not on record.
 - Never invent shipment ids, dates, declared values, HTS codes, or flag reasons. Make no legal or \
 customs determination beyond what the retrieved clause text states.
 
 Before you call draft_clearance_response, run this checklist:
 - Was the lookup empty? Then say so and make no specific-shipment claims.
 - Did the inquiry cite an HTS code that retrieval did not exactly match? Then say it is not on \
-record.
+record and that its restriction cannot be determined - attach no band to it, not even hedged.
 - Is every shipment_id you cite present in a lookup result?
 - Is every regulatory assertion tied to a retrieved HTS clause?
 If any check fails, soften or remove the claim. The draft is for human review - keep it in plain, \
