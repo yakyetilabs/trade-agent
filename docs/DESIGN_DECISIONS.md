@@ -262,7 +262,7 @@ Every internal safeguard from §5 is auth-independent and survives unchanged: ed
    It is in-memory and per-instance-approximate by design: state resets on cold start and is not shared across instances.
    With at most two instances that error bound is small, the goal is abuse-smoothing rather than precise global fairness, and an in-memory check keeps the admission path free of database reads (the same principle the allowlist followed).
    The distributed version (a shared store such as Memorystore) is the named scale-up seam if the instance ceiling ever rises.
-3. **Per-request controls (pre-existing):** the 4000-character inquiry cap, the agent recursion limit, and the two deterministic pre-model guards.
+3. **Per-request controls (pre-existing):** the 4000-character inquiry cap, the agent's model-call cap, and the two deterministic pre-model guards.
 
 **Why in-app rather than edge rate limiting.** Cloudflare's proxy buffers `text/event-stream`, and the split-origin design of §9 exists precisely to keep the SSE reasoning stream unbuffered.
 Putting the `api.` subdomain behind Cloudflare's rate limiter would re-break the stream, so `api.trade-agent.samir.codes` stays DNS-only and the limiter lives in the app.

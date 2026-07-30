@@ -409,7 +409,10 @@ def build_report(
         f"Token prices per concrete model id as of {PRICING_AS_OF} (`backend/eval/pricing.py`);"
         " an id without a price on file renders n/a rather than a wrong number.",
         "Token totals cover every model call in a run - the agent loop and the classifier's"
-        " structured-output call - summed from provider-reported usage.",
+        " structured-output call - summed from provider-reported usage, with one known"
+        " exception recorded in the erratum under Notable findings: a run stopped by the"
+        " iteration cap records only its classifier call, so the affected arms' figures are"
+        " low. Runs from 2026-07-22 onward are unaffected.",
         "Guard-intercepted inquiries cost $0.00 by construction and are excluded from the"
         " per-inquiry figures, which cover the model path only.",
     ]

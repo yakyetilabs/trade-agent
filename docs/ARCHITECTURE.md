@@ -72,7 +72,9 @@ The loop is built with `langchain.agents.create_agent` (LangChain 1.0) in [`back
 
 - **A fresh agent per run.** Chat models carry per-invocation tool bindings, so the agent is constructed per run; the underlying Vertex SDK client is the singleton.
 - **Exactly four tools.** The model selects among `classify_import_restriction`, `lookup_shipment_manifest`, `retrieve_tariff_regulation`, and `draft_clearance_response`, nothing else.
-- **A bounded iteration budget.** `recursion_limit=14` LangGraph supersteps: the normal classify -> lookup -> retrieve -> draft flow is ~9 supersteps, leaving headroom for about two extra rounds (for example a re-retrieve) before the loop is capped and the fallback fires.
+- **A bounded iteration budget.** `MAX_MODEL_CALLS = 7`, enforced by LangChain's `ModelCallLimitMiddleware`: the normal classify -> lookup -> retrieve -> draft flow plus a closing confirmation is 5 model calls, leaving a two-call buffer before the cap ends the run and the fallback fires.
+  The cap is expressed in model calls rather than LangGraph supersteps so the number can be read against the four-tool contract directly, and it exits by jumping to the graph end rather than raising - a capped run therefore still reports the tokens it consumed.
+  `recursion_limit` remains as a loose backstop, derived from `MAX_MODEL_CALLS` so the two cannot drift.
 - **Grounding by contract.** The system prompt enforces a checklist discipline: restate each tool's actual output before acting on it, cite shipments by `shipment_id` and regulations by `hts_code`, never pivot from "the rule says X" to "your shipment is X" without a lookup result, and open with an explicit statement when a lookup matched nothing.
 - **Deterministic sampling.** `temperature=0`; grounding is enforced by the prompt and tools, not by sampling luck.
 - **Provider seam.** [`backend/src/model_provider.py`](../backend/src/model_provider.py) is the single place a concrete provider is bound (Gemini on Vertex today, `vertexai=True`, ADC credentials).

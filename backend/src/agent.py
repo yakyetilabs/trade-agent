@@ -13,8 +13,9 @@ runners share one implementation and persist one identical :class:`~src.models.A
    a terminal ``error`` event on the stream). The only step that rejects a well-formed run.
 4. :func:`build_agent` - a fresh tool-calling agent (the model comes from the provider
    seam :func:`src.model_provider.build_chat_model`) bound to the
-   :class:`~src.tools.vendor_context.VendorContext` schema. Built per run - chat models
-   carry per-invocation tool bindings and must not be memoized.
+   :class:`~src.tools.vendor_context.VendorContext` schema, capped at ``MAX_MODEL_CALLS``
+   model calls by ``ModelCallLimitMiddleware``. Built per run - chat models carry
+   per-invocation tool bindings and must not be memoized.
 5. **Invoke** - the runner drives the agent inside a
    :func:`~src.tracing.trace_context.trace_context` so every tool call appends to one
    ambient trace. ``run_agent`` invokes synchronously; ``stream_agent_run`` drives the same
@@ -22,7 +23,7 @@ runners share one implementation and persist one identical :class:`~src.models.A
    ``ContextVar`` (and the vendor runtime context) propagate into the tools whether they run
    inline (sync) or on a worker thread (async driver).
 6. :func:`build_run_trace` - recover the classification and draft from the recorded tool
-   calls; if the loop ended without a grounded draft (it errored, hit the recursion cap, or
+   calls; if the loop ended without a grounded draft (it errored, hit the model-call cap, or
    never called ``draft_clearance_response``), substitute a safe fallback draft and mark the
    run ``iteration_cap_exceeded``.
 7. :func:`persist_result` - write exactly one :class:`~src.models.AgentTrace`, then project
@@ -45,6 +46,7 @@ import httpx
 from google.api_core import exceptions as google_api_exceptions
 from google.genai import errors as google_genai_errors
 from langchain.agents import create_agent
+from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict
@@ -71,11 +73,20 @@ from src.tracing.trace_context import trace_context
 
 _logger = logging.getLogger(__name__)
 
-# Supersteps, not model calls: a tool-calling round is model->tools = 2 supersteps, so the
-# normal flow (classify -> lookup -> retrieve -> draft = 4 rounds) is ~9 supersteps.
-# 14 leaves headroom for ~2 extra rounds (e.g. a re-retrieve) before the loop is
-# capped and the step-6 fallback fires.
-RECURSION_LIMIT = 14
+# The loop's cap, in model calls - the unit the four-tool contract is written in. The normal
+# flow (classify -> lookup -> retrieve -> draft, then a closing confirmation) is 5 model
+# calls; 7 leaves a two-call buffer for a retry before the cap ends the run and the step-6
+# fallback fires. Enforced by ModelCallLimitMiddleware, which ends the run CLEANLY - the
+# graph returns its messages, so a capped run still reports its consumed tokens.
+MAX_MODEL_CALLS = 7
+
+# A loose backstop for a runaway that is not a model call, sized off MAX_MODEL_CALLS so the
+# two cannot drift. With the middleware in the graph one round is 4 supersteps
+# (before_model -> model -> after_model -> tools; verified against the compiled graph), and
+# the worst case adds the final before_model hop that trips the cap and jumps to end. The +4
+# is margin: this must never fire first, because blowing it raises GraphRecursionError, which
+# loses the run's token accounting where the middleware's clean exit preserves it.
+RECURSION_LIMIT = MAX_MODEL_CALLS * 4 + 4
 
 _FALLBACK_DRAFT = (
     "The assistant could not complete a grounded clearance response for this inquiry "
@@ -248,6 +259,15 @@ def run_pre_model_guards(meta: RunMeta) -> PreModelGuard | None:
     """
     escalation = should_escalate(meta.inquiry)
     if escalation.escalate:
+        # Both guard hits log a greppable event. The cross-vendor rate is a scope signal
+        # expected to stay at zero, and the log is its only alertable surface - no Firestore
+        # read may sit in the request path (docs/DESIGN_DECISIONS.md, "Real-time metric 2").
+        _logger.warning(
+            "guard fired: escalation for trace %s (vendor %s): %s",
+            meta.trace_id,
+            meta.vendor_id,
+            escalation.reason,
+        )
         return PreModelGuard(
             trace=AgentTrace(
                 trace_id=meta.trace_id,
@@ -267,6 +287,12 @@ def run_pre_model_guards(meta: RunMeta) -> PreModelGuard | None:
         meta.vendor_id, meta.inquiry, repository.get_shipment_owner
     )
     if cross_vendor.is_violation:
+        _logger.warning(
+            "guard fired: cross_vendor_refusal for trace %s (vendor %s): %s",
+            meta.trace_id,
+            meta.vendor_id,
+            cross_vendor.reason,
+        )
         refusal = ImportClassification(
             intent=InquiryIntent.CROSS_VENDOR_REFUSAL,
             confidence=1.0,
@@ -295,20 +321,19 @@ def run_pre_model_guards(meta: RunMeta) -> PreModelGuard | None:
 def build_agent(model_id: str) -> CompiledStateGraph[Any, VendorContext, Any, Any]:
     """Construct a fresh tool-calling agent bound to the vendor-context schema.
 
-    Built with :func:`langchain.agents.create_agent` (the LangChain 1.0 successor to the
-    deprecated ``langgraph.prebuilt.create_react_agent``). The context type-param is pinned
-    to :class:`VendorContext` - ``create_agent`` threads it into the compiled graph's return
-    type, so the ``context=`` kwarg at the invoke site type-checks with no cast; the
-    state/input/output params are langgraph internals treated opaquely.
+    Built per run: chat models carry per-invocation tool bindings and must not be memoized.
+    Uses ``create_agent``, the LangChain 1.0 successor to the deprecated
+    ``create_react_agent``, and takes its model from the provider seam - so this function
+    names no concrete model class, which is also the seam tests fake to run credential-free.
 
-    The chat model comes from the provider seam
-    :func:`src.model_provider.build_chat_model`, so this function names no concrete model
-    class - it only wires tools, prompt, and the vendor context. Isolated so tests can
-    substitute a fake agent (or, via the seam, a fake chat model) without credentials.
+    Three argument choices are load-bearing:
 
-    It is built with ``stream_thoughts=True`` so the loop's reasoning is available to the
-    streaming runner as ``thinking_delta`` events; the synchronous path simply ignores the
-    returned thought text.
+    - ``context_schema=VendorContext`` pins the compiled graph's context type-param, so the
+      ``context=`` kwarg at the invoke site type-checks with no cast.
+    - ``stream_thoughts=True`` exposes the loop's reasoning to the streaming runner as
+      ``thinking_delta`` events; the synchronous path ignores the returned thought text.
+    - ``exit_behavior="end"`` makes the cap jump to the graph end instead of raising, so a
+      capped run still returns its messages and its token accounting (see MAX_MODEL_CALLS).
     """
     model = build_chat_model(model_id, stream_thoughts=True)
     return create_agent(
@@ -321,6 +346,9 @@ def build_agent(model_id: str) -> CompiledStateGraph[Any, VendorContext, Any, An
         ],
         system_prompt=_SYSTEM_PROMPT,
         context_schema=VendorContext,
+        middleware=[
+            ModelCallLimitMiddleware(run_limit=MAX_MODEL_CALLS, exit_behavior="end"),
+        ],
     )
 
 
@@ -577,16 +605,26 @@ def build_run_trace(
         )
         classification = ImportClassification(
             intent=InquiryIntent.ITERATION_CAP_EXCEEDED,
+            # 0.0, not 1.0: it puts a failed run in the "refuse" band of the threshold map
+            # (docs/DESIGN_DECISIONS.md) and shows up as a dip in the eval report's
+            # per-category confidence table rather than averaging in as a success.
             confidence=0.0,
             reasoning=reason,
         )
         draft_response = _FALLBACK_DRAFT
+        # Logged here, not in the runners, so one event covers both.
+        _logger.warning(
+            "no-draft fallback for trace %s (vendor %s) after %d tool calls: %s",
+            meta.trace_id,
+            meta.vendor_id,
+            len(tool_calls),
+            reason,
+        )
 
-    # error_class is set only when an actual invocation exception fired - never on a plain
-    # iteration-cap exhaustion (the loop ran to the recursion limit with no error) or a
-    # healthy run. It is what the API surfaces read to decide whether to keep returning
-    # this fallback draft as-is (UPSTREAM_ERROR) or surface the condition honestly instead
-    # (RATE_LIMITED, TIMEOUT) - see RATE_LIMITED_CLIENT_MESSAGE / TIMEOUT_CLIENT_MESSAGE.
+    # Set only when an invocation exception fired - never on a healthy run, and never on a
+    # capped one, since the middleware ends those cleanly and leaves nothing to classify. The
+    # API surfaces read it to decide whether to return this fallback draft as-is
+    # (UPSTREAM_ERROR) or surface the condition honestly (RATE_LIMITED, TIMEOUT).
     error_class = classify_invoke_error(invoke_error) if invoke_error is not None else None
 
     draft_actionable = _is_draft_actionable(classification, tool_calls, draft_response)

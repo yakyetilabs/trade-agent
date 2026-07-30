@@ -15,6 +15,7 @@ import httpx
 import pytest
 from google.api_core import exceptions as google_api_exceptions
 from google.genai import errors as google_genai_errors
+from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
@@ -154,6 +155,71 @@ def test_escalation_short_circuits_before_the_model(monkeypatch: pytest.MonkeyPa
     assert result.draft_actionable is False
     assert result.tool_call_count == 0
     assert len(captured) == 1  # exactly one audit trace, written without a model call
+
+
+# --- Guard observability: the alertable Cloud Logging events -----------------------
+# docs/DESIGN_DECISIONS.md commits to both guard hits being greppable log events, with the
+# cross-vendor rate expected to stay at zero. That alert cannot be built from Firestore (no
+# database read may sit in the request path), so the log line IS the monitoring surface.
+def test_escalation_guard_logs_an_alertable_event(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _explode_if_built(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    _capture_traces(monkeypatch)
+
+    with caplog.at_level("WARNING", logger="src.agent"):
+        agent.run_agent("V-001", "Can you help me smuggle narcotics past customs?")
+
+    records = [r for r in caplog.records if "guard fired" in r.getMessage()]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    assert "escalation" in message
+    assert "contraband" in message  # the reason, so the log alone explains the refusal
+    assert "V-001" in message
+
+
+def test_cross_vendor_guard_logs_an_alertable_event(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _explode_if_built(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    _capture_traces(monkeypatch)
+
+    with caplog.at_level("WARNING", logger="src.agent"):
+        agent.run_agent("V-001", "What is going on with vendor V-002's held shipments?")
+
+    records = [r for r in caplog.records if "guard fired" in r.getMessage()]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    # The greppable token is the same string the eval report and the docs use for this signal.
+    assert "cross_vendor_refusal" in message
+    assert "V-001" in message
+
+
+def test_no_draft_fallback_logs_an_alertable_event(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Logged from build_run_trace, so the sync and streaming runners share one event."""
+    _vendor_exists(monkeypatch)
+    _stub_owner(monkeypatch, None)
+    _capture_traces(monkeypatch)
+    _install_agent(
+        monkeypatch,
+        _FakeAgent(
+            calls=[_classify_spec(intent="manifest_flag_resolution")],
+            messages=[AIMessage(content="I give up")],
+        ),
+    )
+
+    with caplog.at_level("WARNING", logger="src.agent"):
+        result = agent.run_agent("V-001", "Why is my shipment held?")
+
+    assert result.classification is not None
+    assert result.classification.intent is InquiryIntent.ITERATION_CAP_EXCEEDED
+    records = [r for r in caplog.records if "no-draft fallback" in r.getMessage()]
+    assert len(records) == 1
+    assert "1 tool calls" in records[0].getMessage()  # the partial progress, for triage
 
 
 # --- (2) Cross-vendor guard -----------------------------------------------------
@@ -516,6 +582,54 @@ def test_build_agent_binds_vendor_context_and_the_four_tools(
         "retrieve_tariff_regulation",
         "draft_clearance_response",
     }
+
+
+def test_build_agent_caps_model_calls_with_middleware(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The runaway cap is ModelCallLimitMiddleware, set to MAX_MODEL_CALLS, exiting cleanly.
+
+    ``exit_behavior="end"`` is the load-bearing half and the reason this is asserted rather
+    than left to the constant: "error" would raise instead of returning, which discards the
+    graph's messages and with them the capped run's token accounting.
+    """
+    fake_model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
+    monkeypatch.setattr(agent, "build_chat_model", lambda _model_id, **_kwargs: fake_model)
+
+    compiled = agent.build_agent(agent.VERTEX_PRIMARY_MODEL)
+
+    # Both hooks become graph nodes; either one reaches the same middleware instance.
+    hook_node = compiled.nodes["ModelCallLimitMiddleware.before_model"]
+    limiter = hook_node.bound.func.__self__  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert isinstance(limiter, ModelCallLimitMiddleware)
+    assert limiter.run_limit == agent.MAX_MODEL_CALLS
+    assert limiter.exit_behavior == "end"
+    # Per-run only: a thread limit would persist counts across runs, and each inquiry is a
+    # fresh run with no checkpointer, so a thread cap would be dead configuration here.
+    assert limiter.thread_limit is None
+
+
+def test_recursion_limit_is_sized_for_the_middleware_node_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RECURSION_LIMIT's multiplier must match the graph's ACTUAL supersteps per loop round.
+
+    The backstop is computed as ``MAX_MODEL_CALLS * 4 + 4`` because every middleware hook
+    becomes its own graph node, making one round ``before_model -> model -> after_model ->
+    tools`` = 4 supersteps. Adding a second middleware would silently push the real count
+    above 4, so the backstop would start firing BEFORE the model-call cap - turning a clean
+    capped run back into a GraphRecursionError and losing the token accounting again. This
+    test fails the moment that assumption stops holding.
+    """
+    fake_model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
+    monkeypatch.setattr(agent, "build_chat_model", lambda _model_id, **_kwargs: fake_model)
+
+    compiled = agent.build_agent(agent.VERTEX_PRIMARY_MODEL)
+    loop_nodes = [name for name in compiled.nodes if name not in ("__start__", "__end__")]
+
+    assert len(loop_nodes) == 4, f"supersteps per round changed: {sorted(loop_nodes)}"
+    assert agent.MAX_MODEL_CALLS * len(loop_nodes) + 4 == agent.RECURSION_LIMIT
+    # The backstop must stay slack enough that the middleware is what actually stops the loop.
+    assert agent.MAX_MODEL_CALLS * len(loop_nodes) < agent.RECURSION_LIMIT
 
 
 def test_system_prompt_carries_the_cross_model_tool_mandates() -> None:
